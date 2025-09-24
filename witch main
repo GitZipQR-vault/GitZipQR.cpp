@@ -1,0 +1,938 @@
+[1mdiff --git a/Makefile b/Makefile[m
+[1mindex 92bb222..cdeb1fe 100644[m
+[1m--- a/Makefile[m
+[1m+++ b/Makefile[m
+[36m@@ -1,15 +1,15 @@[m
+[31m-CXX := g++[m
+[31m-CXXFLAGS := -O2 -std=gnu++20 -Wall -Wextra -I./ -Ithird_party[m
+[31m-LIBS := -lssl -lcrypto -lqrencode -lpng -lpthread -lZXing[m
+[31m-BIN := build[m
+[31m-ENC := $(BIN)/encode[m
+[31m-DEC := $(BIN)/decode[m
+[31m-all: $(ENC) $(DEC)[m
+[31m-$(ENC): src/encode.cpp src/common.hpp third_party/json.hpp[m
+[31m-	@mkdir -p $(BIN)[m
+[31m-	$(CXX) $(CXXFLAGS) $< -o $@ $(LIBS)[m
+[31m-$(DEC): src/decode.cpp src/common.hpp third_party/json.hpp[m
+[31m-	@mkdir -p $(BIN)[m
+[31m-	$(CXX) $(CXXFLAGS) $< -o $@ $(LIBS)[m
+[31m-clean: ; rm -rf $(BIN)[m
+[31m-.PHONY: all clean[m
+[32m+[m[32m.PHONY: all encode decode clean[m
+[32m+[m[32mall: encode decode[m
+[32m+[m
+[32m+[m[32mencode:[m
+[32m+[m	[32m@./build.sh >/dev/null || ./build.sh[m
+[32m+[m	[32m@ln -sf build/encode MakeEncode[m
+[32m+[m	[32m@echo "Built: ./MakeEncode"[m
+[32m+[m
+[32m+[m[32mdecode:[m
+[32m+[m	[32m@./build.sh >/dev/null || ./build.sh[m
+[32m+[m	[32m@ln -sf build/decode MakeDecode[m
+[32m+[m	[32m@echo "Built: ./MakeDecode"[m
+[32m+[m
+[32m+[m[32mclean:[m
+[32m+[m	[32mrm -rf build MakeEncode MakeDecode[m
+[1mdiff --git a/build.sh b/build.sh[m
+[1mnew file mode 100755[m
+[1mindex 0000000..ec536cf[m
+[1m--- /dev/null[m
+[1m+++ b/build.sh[m
+[36m@@ -0,0 +1,67 @@[m
+[32m+[m[32m#!/usr/bin/env bash[m
+[32m+[m[32mset -euo pipefail[m
+[32m+[m
+[32m+[m[32mmkdir -p build[m
+[32m+[m
+[32m+[m[32m# --- pkg-config helpers ---[m
+[32m+[m[32mhave_pkg() { pkg-config --exists "$1" 2>/dev/null; }[m
+[32m+[m[32mpc_cflags() { pkg-config --cflags "$@" 2>/dev/null || true; }[m
+[32m+[m[32mpc_libs()   { pkg-config --libs   "$@" 2>/dev/null || true; }[m
+[32m+[m
+[32m+[m[32mCXX="${CXX:-g++}"[m
+[32m+[m[32mCXXSTD="-std=c++17"[m
+[32m+[m[32mOPT="-O2 -pipe"[m
+[32m+[m[32mWARN="-Wall -Wextra -Wpedantic"[m
+[32m+[m[32mINC="-Isrc -Ithird_party"[m
+[32m+[m[32m# базовые либы[m
+[32m+[m[32mREQ_PKGS=(libqrencode libpng openssl)[m
+[32m+[m[32mREQ_CFLAGS="$(pc_cflags ${REQ_PKGS[*]})"[m
+[32m+[m[32mREQ_LIBS="$(pc_libs   ${REQ_PKGS[*]})"[m
+[32m+[m
+[32m+[m[32m# ZXing (опционально)[m
+[32m+[m[32mZX_PKGS=(zxing-cpp)[m
+[32m+[m[32mZX_CFLAGS=""[m
+[32m+[m[32mZX_LIBS=""[m
+[32m+[m[32mif have_pkg zxing-cpp; then[m
+[32m+[m[32m  ZX_CFLAGS="$(pc_cflags ${ZX_PKGS[*]})"[m
+[32m+[m[32m  ZX_LIBS="$(pc_libs   ${ZX_PKGS[*]})"[m
+[32m+[m[32m  ZX_OK=1[m
+[32m+[m[32melse[m
+[32m+[m[32m  ZX_OK=0[m
+[32m+[m[32mfi[m
+[32m+[m
+[32m+[m[32m# nlohmann/json — заголовок обязателен (у нас есть обёртка third_party/json.hpp)[m
+[32m+[m[32m# Если у системы нет заголовка, сборка упадёт — подскажем пакет.[m
+[32m+[m[32mif ! echo '#include <nlohmann/json.hpp>' | ${CXX} -x c++ - -c -o /dev/null ${CXXSTD} ${OPT} ${WARN} ${INC} ${REQ_CFLAGS} ${ZX_CFLAGS} 2>/dev/null; then[m
+[32m+[m[32m  echo "[!] Missing header: nlohmann/json.hpp"[m
+[32m+[m[32m  echo "    Ubuntu/Debian: sudo apt-get install -y nlohmann-json3-dev"[m
+[32m+[m[32m  exit 1[m
+[32m+[m[32mfi[m
+[32m+[m
+[32m+[m[32mcompile() {[m
+[32m+[m[32m  local OUT="$1"; shift[m
+[32m+[m[32m  ${CXX} ${CXXSTD} ${OPT} ${WARN} ${INC} ${REQ_CFLAGS} ${ZX_CFLAGS} "$@" -o "build/${OUT}" ${REQ_LIBS} ${ZX_LIBS}[m
+[32m+[m[32m  echo "Built: build/${OUT}"[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mcase "${1:-all}" in[m
+[32m+[m[32m  encode|all)[m
+[32m+[m[32m    echo "[*] Build encoder"[m
+[32m+[m[32m    compile encode src/encode.cpp[m
+[32m+[m[32m    ln -sf build/encode MakeEncode[m
+[32m+[m[32m    ;;&[m
+[32m+[m[32m  decode|all)[m
+[32m+[m[32m    echo "[*] Build decoder"[m
+[32m+[m[32m    if [ $ZX_OK -eq 1 ]; then[m
+[32m+[m[32m      compile decode src/decode.cpp[m
+[32m+[m[32m    else[m
+[32m+[m[32m      echo "[!] ZXing not found via pkg-config (zxing-cpp). Building fallback decoder."[m
+[32m+[m[32m      compile decode src/decode_fallback.cpp[m
+[32m+[m[32m    fi[m
+[32m+[m[32m    ln -sf build/decode MakeDecode[m
+[32m+[m[32m    ;;[m
+[32m+[m[32m  *)[m
+[32m+[m[32m    echo "Usage: ./build.sh [encode|decode|all]"[m
+[32m+[m[32m    exit 2[m
+[32m+[m[32m    ;;[m
+[32m+[m[32mesac[m
+[1mdiff --git a/build/encode b/build/encode[m
+[1mdeleted file mode 100755[m
+[1mindex df76d2d..0000000[m
+Binary files a/build/encode and /dev/null differ
+[1mdiff --git a/src/common.hpp b/src/common.hpp[m
+[1mindex cc22b0b..d780b3a 100644[m
+[1m--- a/src/common.hpp[m
+[1m+++ b/src/common.hpp[m
+[36m@@ -13,65 +13,152 @@[m
+ #include <termios.h>[m
+ #include <iostream>[m
+ #include <unistd.h>[m
+[32m+[m
+ namespace gzqr {[m
+ [m
+[31m-// forward decl for encoder PNG writer[m
+[32m+[m[32m// forward decl for encoder QR writer (local impl in encode.cpp)[m
+ void save_qr_png_lib(const std::string& out, const std::string& text, int ecl_level, int version, int margin, int scale);[m
+[32m+[m
+ struct KDFParams { uint64_t N; uint32_t r; uint32_t p; };[m
+[31m-inline std::string sha256_hex(const std::vector<uint8_t>& buf){ unsigned char h[32]; SHA256(buf.data(), buf.size(), h);[m
+[31m-  static const char* X="0123456789abcdef"; std::string s(64,'0'); for(int i=0;i<32;i++){ s[2*i]=X[(h[i]>>4)&15]; s[2*i+1]=X[h[i]&15]; } return s; }[m
+[31m-inline std::string sha256_hex_file(const std::string& path){ FILE* f=fopen(path.c_str(),"rb"); if(!f) throw std::runtime_error("open sha256");[m
+[31m-  SHA256_CTX c; SHA256_Init(&c); std::vector<uint8_t>b(1<<20); size_t n; while((n=fread(b.data(),1,b.size(),f))>0) SHA256_Update(&c,b.data(),n);[m
+[31m-  fclose(f); unsigned char h[32]; SHA256_Final(h,&c); static const char* X="0123456789abcdef"; std::string s(64,'0'); for(int i=0;i<32;i++){ s[2*i]=X[(h[i]>>4)&15]; s[2*i+1]=X[h[i]&15]; } return s; }[m
+[31m-inline std::string b64(const std::vector<uint8_t>& in){ static const char* t="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";[m
+[31m-  std::string o; o.reserve(((in.size()+2)/3)*4); size_t i=0; while(i+3<=in.size()){ uint32_t v=(in[i]<<16)|(in[i+1]<<8)|in[i+2]; i+=3;[m
+[31m-    o.push_back(t[(v>>18)&63]); o.push_back(t[(v>>12)&63]); o.push_back(t[(v>>6)&63]); o.push_back(t[v&63]); }[m
+[31m-  if(i+1==in.size()){ uint32_t v=(in[i]<<16); o.push_back(t[(v>>18)&63]); o.push_back(t[(v>>12)&63]); o.push_back('='); o.push_back('='); }[m
+[31m-  else if(i+2==in.size()){ uint32_t v=(in[i]<<16)|(in[i+1]<<8); o.push_back(t[(v>>18)&63]); o.push_back(t[(v>>12)&63]); o.push_back(t[(v>>6)&63]); o.push_back('='); }[m
+[31m-  return o; }[m
+[31m-inline std::vector<uint8_t> b64d(const std::string& s){ int T[256]; for(int i=0;i<256;i++) T[i]=-1; std::string tab="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";[m
+[31m-  for(int i=0;i<64;i++) T[(unsigned char)tab[i]]=i; std::vector<uint8_t> o; o.reserve(s.size()*3/4);[m
+[31m-  int val=0,valb=-8; for(unsigned char c:s){ if(T[c]==-1){ if(c=='=') break; else continue; } val=(val<<6)+T[c]; valb+=6; if(valb>=0){ o.push_back((uint8_t)((val>>valb)&255)); valb-=8; } } return o; }[m
+[31m-inline std::string join_passwords(const std::vector<std::string>& parts){ std::string r; for(size_t i=0;i<parts.size();++i){ if(i) r.push_back('\0'); r+=parts[i]; } return r; }[m
+[31m-inline std::string prompt_hidden(const std::string& label){ const char* pf = std::getenv("GZQR_PASSFILE");[m
+[31m-  if(pf && *pf){ FILE* f=fopen(pf,"rb"); if(!f) throw std::runtime_error("GZQR_PASSFILE open"); std::string s; char buf[4096]; size_t n;[m
+[31m-    while((n=fread(buf,1,sizeof(buf),f))>0) s.append(buf,n); fclose(f); while(!s.empty()&&(s.back()=='\n'||s.back()=='\r')) s.pop_back(); return s; }[m
+[31m-  if(!::isatty(STDIN_FILENO)) throw std::runtime_error("No TTY and no GZQR_PASSFILE"); std::fprintf(stdout,"%s", label.c_str()); std::fflush(stdout);[m
+[32m+[m
+[32m+[m[32m// ── helpers ─────────────────────────────────────────────────────────────[m
+[32m+[m[32minline std::string sha256_hex(const std::vector<uint8_t>& buf){[m
+[32m+[m[32m  unsigned char h[32]; SHA256(buf.data(), buf.size(), h);[m
+[32m+[m[32m  static const char* X="0123456789abcdef";[m
+[32m+[m[32m  std::string s(64,'0');[m
+[32m+[m[32m  for(int i=0;i<32;i++){ s[2*i]=X[(h[i]>>4)&15]; s[2*i+1]=X[h[i]&15]; }[m
+[32m+[m[32m  return s;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32minline std::string sha256_hex_file(const std::string& path){[m
+[32m+[m[32m  FILE* f=fopen(path.c_str(),"rb"); if(!f) throw std::runtime_error("open sha256");[m
+[32m+[m[32m  SHA256_CTX c; SHA256_Init(&c);[m
+[32m+[m[32m  std::vector<uint8_t>b(1<<20); size_t n;[m
+[32m+[m[32m  while((n=fread(b.data(),1,b.size(),f))>0) SHA256_Update(&c,b.data(),n);[m
+[32m+[m[32m  fclose(f);[m
+[32m+[m[32m  unsigned char h[32]; SHA256_Final(h,&c);[m
+[32m+[m[32m  static const char* X="0123456789abcdef"; std::string s(64,'0');[m
+[32m+[m[32m  for(int i=0;i<32;i++){ s[2*i]=X[(h[i]>>4)&15]; s[2*i+1]=X[h[i]&15]; }[m
+[32m+[m[32m  return s;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32minline std::string b64(const std::vector<uint8_t>& in){[m
+[32m+[m[32m  static const char* t="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";[m
+[32m+[m[32m  std::string o; o.reserve(((in.size()+2)/3)*4); size_t i=0;[m
+[32m+[m[32m  while(i+3<=in.size()){[m
+[32m+[m[32m    uint32_t v=(in[i]<<16)|(in[i+1]<<8)|in[i+2]; i+=3;[m
+[32m+[m[32m    o.push_back(t[(v>>18)&63]); o.push_back(t[(v>>12)&63]); o.push_back(t[(v>>6)&63]); o.push_back(t[v&63]);[m
+[32m+[m[32m  }[m
+[32m+[m[32m  if(i+1==in.size()){[m
+[32m+[m[32m    uint32_t v=(in[i]<<16); o.push_back(t[(v>>18)&63]); o.push_back(t[(v>>12)&63]); o.push_back('=' ); o.push_back('=' );[m
+[32m+[m[32m  } else if(i+2==in.size()){[m
+[32m+[m[32m    uint32_t v=(in[i]<<16)|(in[i+1]<<8); o.push_back(t[(v>>18)&63]); o.push_back(t[(v>>12)&63]); o.push_back(t[(v>> 6)&63]); o.push_back('=');[m
+[32m+[m[32m  }[m
+[32m+[m[32m  return o;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32minline std::vector<uint8_t> b64d(const std::string& s){[m
+[32m+[m[32m  int T[256]; for(int i=0;i<256;i++) T[i]=-1;[m
+[32m+[m[32m  std::string tab="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";[m
+[32m+[m[32m  for(int i=0;i<64;i++) T[(unsigned char)tab[i]]=i;[m
+[32m+[m[32m  std::vector<uint8_t> o; o.reserve(s.size()*3/4);[m
+[32m+[m[32m  int val=0,valb=-8; for(unsigned char c:s){[m
+[32m+[m[32m    if(T[c]==-1){ if(c=='=') break; else continue; }[m
+[32m+[m[32m    val=(val<<6)+T[c]; valb+=6; if(valb>=0){ o.push_back((uint8_t)((val>>valb)&255)); valb-=8; }[m
+[32m+[m[32m  }[m
+[32m+[m[32m  return o;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32minline std::string join_passwords(const std::vector<std::string>& parts){[m
+[32m+[m[32m  std::string r; for(size_t i=0;i<parts.size();++i){ if(i) r.push_back('\0'); r+=parts[i]; } return r;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32minline std::string prompt_hidden(const std::string& label){[m
+[32m+[m[32m  const char* pf = std::getenv("GZQR_PASSFILE");[m
+[32m+[m[32m  if(pf && *pf){[m
+[32m+[m[32m    FILE* f=fopen(pf,"rb"); if(!f) throw std::runtime_error("GZQR_PASSFILE open");[m
+[32m+[m[32m    std::string s; char buf[4096]; size_t n;[m
+[32m+[m[32m    while((n=fread(buf,1,sizeof(buf),f))>0) s.append(buf,n); fclose(f);[m
+[32m+[m[32m    while(!s.empty()&&(s.back()=='\n'||s.back()=='\r')) s.pop_back();[m
+[32m+[m[32m    return s;[m
+[32m+[m[32m  }[m
+[32m+[m[32m  if(!::isatty(STDIN_FILENO)) throw std::runtime_error("No TTY and no GZQR_PASSFILE");[m
+[32m+[m[32m  std::fprintf(stdout,"%s", label.c_str()); std::fflush(stdout);[m
+   termios oldt,newt; tcgetattr(STDIN_FILENO,&oldt); newt=oldt; newt.c_lflag&=~ECHO; tcsetattr(STDIN_FILENO,TCSANOW,&newt);[m
+[31m-  std::string s; std::getline(std::cin,s); tcsetattr(STDIN_FILENO,TCSANOW,&oldt); std::fprintf(stdout,"\n"); return s; }[m
+[32m+[m[32m  std::string s; std::getline(std::cin,s); tcsetattr(STDIN_FILENO,TCSANOW,&oldt); std::fprintf(stdout,"\n");[m
+[32m+[m[32m  return s;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32minline void secure_zero(std::vector<uint8_t>& v){[m
+[32m+[m[32m  volatile uint8_t* p = v.data();[m
+[32m+[m[32m  for(size_t i=0;i<v.size();++i) p[i]=0;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32minline std::string tmp_unique(const std::string& prefix, const std::string& suffix=""){[m
+[32m+[m[32m  auto p = std::filesystem::temp_directory_path() / (prefix + std::filesystem::unique_path().string() + suffix);[m
+[32m+[m[32m  return p.string();[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// ── crypto ──────────────────────────────────────────────────────────────[m
+ inline std::vector<uint8_t> scrypt_kdf(const std::string& pass, const std::vector<uint8_t>& salt, const KDFParams& k){[m
+[31m-  std::vector<uint8_t> key(32); if(1!=EVP_PBE_scrypt(pass.c_str(), pass.size(), salt.data(), salt.size(), k.N, k.r, k.p, 512ull*1024*1024, key.data(), key.size()))[m
+[31m-    throw std::runtime_error("scrypt failed"); return key; }[m
+[31m-inline void aes_gcm_encrypt_file(const std::string& in, const std::string& out, const std::vector<uint8_t>& key, const std::vector<uint8_t>& nonce, const std::vector<uint8_t>& aad){[m
+[31m-  EVP_CIPHER_CTX* ctx=EVP_CIPHER_CTX_new(); if(!ctx) throw std::runtime_error("ctx"); FILE* fi=fopen(in.c_str(),"rb"); if(!fi){EVP_CIPHER_CTX_free(ctx); throw std::runtime_error("open in");}[m
+[32m+[m[32m  std::vector<uint8_t> key(32);[m
+[32m+[m[32m  if(1!=EVP_PBE_scrypt(pass.c_str(), pass.size(), salt.data(), salt.size(), k.N, k.r, k.p,[m
+[32m+[m[32m                       512ull*1024*1024, key.data(), key.size()))[m
+[32m+[m[32m    throw std::runtime_error("scrypt failed");[m
+[32m+[m[32m  return key;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32minline void aes_gcm_encrypt_file(const std::string& in, const std::string& out,[m
+[32m+[m[32m                                 const std::vector<uint8_t>& key, const std::vector<uint8_t>& nonce,[m
+[32m+[m[32m                                 const std::vector<uint8_t>& aad){[m
+[32m+[m[32m  EVP_CIPHER_CTX* ctx=EVP_CIPHER_CTX_new(); if(!ctx) throw std::runtime_error("ctx");[m
+[32m+[m[32m  FILE* fi=fopen(in.c_str(),"rb"); if(!fi){EVP_CIPHER_CTX_free(ctx); throw std::runtime_error("open in");}[m
+   FILE* fo=fopen(out.c_str(),"wb"); if(!fo){fclose(fi); EVP_CIPHER_CTX_free(ctx); throw std::runtime_error("open out");}[m
+   if(1!=EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), nullptr, nullptr, nullptr)) throw std::runtime_error("init");[m
+[31m-  if(1!=EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, nonce.size(), nullptr)) throw std::runtime_error("ivlen");[m
+[32m+[m[32m  if(1!=EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, (int)nonce.size(), nullptr)) throw std::runtime_error("ivlen");[m
+   if(1!=EVP_EncryptInit_ex(ctx, nullptr, nullptr, key.data(), nonce.data())) throw std::runtime_error("keyiv");[m
+[31m-  int outl=0; if(!aad.empty()){ if(1!=EVP_EncryptUpdate(ctx,nullptr,&outl,aad.data(),aad.size())) throw std::runtime_error("aad"); }[m
+[31m-  std::vector<uint8_t> buf(1<<20), obuf((1<<20)+16); size_t n; while((n=fread(buf.data(),1,buf.size(),fi))>0){[m
+[31m-    if(1!=EVP_EncryptUpdate(ctx,obuf.data(),&outl,buf.data(),(int)n)) throw std::runtime_error("upd"); if(outl>0) fwrite(obuf.data(),1,outl,fo); }[m
+[31m-  if(1!=EVP_EncryptFinal_ex(ctx,obuf.data(),&outl)) throw std::runtime_error("final"); if(outl>0) fwrite(obuf.data(),1,outl,fo);[m
+[31m-  unsigned char tag[16]; if(1!=EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, 16, tag)) throw std::runtime_error("tag"); fwrite(tag,1,16,fo);[m
+[31m-  fclose(fi); fclose(fo); EVP_CIPHER_CTX_free(ctx); }[m
+[31m-inline std::vector<uint8_t> aes_gcm_decrypt_mem(const std::vector<uint8_t>& in, const std::vector<uint8_t>& key, const std::vector<uint8_t>& nonce, const std::vector<uint8_t>& aad){[m
+[32m+[m[32m  int outl=0; if(!aad.empty()){ if(1!=EVP_EncryptUpdate(ctx,nullptr,&outl,aad.data(),(int)aad.size())) throw std::runtime_error("aad"); }[m
+[32m+[m[32m  std::vector<uint8_t> buf(1<<20), obuf((1<<20)+16); size_t n;[m
+[32m+[m[32m  while((n=fread(buf.data(),1,buf.size(),fi))>0){[m
+[32m+[m[32m    if(1!=EVP_EncryptUpdate(ctx,obuf.data(),&outl,buf.data(),(int)n)) throw std::runtime_error("upd");[m
+[32m+[m[32m    if(outl>0) fwrite(obuf.data(),1,outl,fo);[m
+[32m+[m[32m  }[m
+[32m+[m[32m  if(1!=EVP_EncryptFinal_ex(ctx,obuf.data(),&outl)) throw std::runtime_error("final");[m
+[32m+[m[32m  if(outl>0) fwrite(obuf.data(),1,outl,fo);[m
+[32m+[m[32m  unsigned char tag[16]; if(1!=EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, 16, tag)) throw std::runtime_error("tag");[m
+[32m+[m[32m  fwrite(tag,1,16,fo);[m
+[32m+[m[32m  fclose(fi); fclose(fo); EVP_CIPHER_CTX_free(ctx);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32minline std::vector<uint8_t> aes_gcm_decrypt_mem(const std::vector<uint8_t>& in,[m
+[32m+[m[32m                                                const std::vector<uint8_t>& key,[m
+[32m+[m[32m                                                const std::vector<uint8_t>& nonce,[m
+[32m+[m[32m                                                const std::vector<uint8_t>& aad){[m
+   if(in.size()<16) throw std::runtime_error("cipher too small"); size_t csz=in.size()-16; const unsigned char* tag=in.data()+csz;[m
+   EVP_CIPHER_CTX* ctx=EVP_CIPHER_CTX_new(); if(!ctx) throw std::runtime_error("ctx");[m
+   if(1!=EVP_DecryptInit_ex(ctx,EVP_aes_256_gcm(),nullptr,nullptr,nullptr)) throw std::runtime_error("init");[m
+[31m-  if(1!=EVP_CIPHER_CTX_ctrl(ctx,EVP_CTRL_GCM_SET_IVLEN,nonce.size(),nullptr)) throw std::runtime_error("ivlen");[m
+[32m+[m[32m  if(1!=EVP_CIPHER_CTX_ctrl(ctx,EVP_CTRL_GCM_SET_IVLEN,(int)nonce.size(),nullptr)) throw std::runtime_error("ivlen");[m
+   if(1!=EVP_DecryptInit_ex(ctx,nullptr,nullptr,key.data(),nonce.data())) throw std::runtime_error("keyiv");[m
+[31m-  int outl=0; if(!aad.empty()){ if(1!=EVP_DecryptUpdate(ctx,nullptr,&outl,aad.data(),aad.size())) throw std::runtime_error("aad"); }[m
+[32m+[m[32m  int outl=0; if(!aad.empty()){ if(1!=EVP_DecryptUpdate(ctx,nullptr,&outl,aad.data(),(int)aad.size())) throw std::runtime_error("aad"); }[m
+   std::vector<uint8_t> out(csz+16); if(1!=EVP_DecryptUpdate(ctx,out.data(),&outl,in.data(),(int)csz)) throw std::runtime_error("upd");[m
+   if(1!=EVP_CIPHER_CTX_ctrl(ctx,EVP_CTRL_GCM_SET_TAG,16,(void*)tag)) throw std::runtime_error("settag");[m
+   int tmplen=0; if(1!=EVP_DecryptFinal_ex(ctx,out.data()+outl,&tmplen)){EVP_CIPHER_CTX_free(ctx); throw std::runtime_error("tag mismatch"); }[m
+[31m-  out.resize(outl+tmplen); EVP_CIPHER_CTX_free(ctx); return out; }[m
+[31m-inline std::vector<uint8_t> read_all(const std::string&p){ FILE*f=fopen(p.c_str(),"rb"); if(!f) throw std::runtime_error("open");[m
+[31m-  std::vector<uint8_t> v; std::vector<uint8_t>b(1<<20); size_t n; while((n=fread(b.data(),1,b.size(),f))>0) v.insert(v.end(),b.begin(),b.begin()+n); fclose(f); return v; }[m
+[31m-inline void write_all(const std::string&p,const std::vector<uint8_t>&v){ FILE*f=fopen(p.c_str(),"wb"); if(!f) throw std::runtime_error("open out"); fwrite(v.data(),1,v.size(),f); fclose(f); }[m
+[32m+[m[32m  out.resize(outl+tmplen); EVP_CIPHER_CTX_free(ctx); return out;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32minline std::vector<uint8_t> read_all(const std::string&p){[m
+[32m+[m[32m  FILE*f=fopen(p.c_str(),"rb"); if(!f) throw std::runtime_error("open");[m
+[32m+[m[32m  std::vector<uint8_t> v; std::vector<uint8_t>b(1<<20); size_t n;[m
+[32m+[m[32m  while((n=fread(b.data(),1,b.size(),f))>0) v.insert(v.end(),b.begin(),b.begin()+n);[m
+[32m+[m[32m  fclose(f); return v;[m
+ }[m
+[32m+[m[32minline void write_all(const std::string&p,const std::vector<uint8_t>&v){[m
+[32m+[m[32m  FILE*f=fopen(p.c_str(),"wb"); if(!f) throw std::runtime_error("open out"); fwrite(v.data(),1,v.size(),f); fclose(f);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m} // namespace gzqr[m
+ [m
+ namespace gzqr {[m
+[31m-// AES-256-GCM file decrypt: inFile -> outFile[m
+ inline void aes_gcm_decrypt_file_to_path(const std::string& inFile,[m
+                                          const std::string& outFile,[m
+                                          const std::vector<unsigned char>& key,[m
+[36m@@ -87,38 +174,36 @@[m [minline void aes_gcm_decrypt_file_to_path(const std::string& inFile,[m
+   if(!ctx){ fclose(fi); fclose(fo); throw std::runtime_error("ctx new"); }[m
+ [m
+   if(1!=EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), nullptr, nullptr, nullptr))[m
+[31m-    throw std::runtime_error("dec init");[m
+[31m-[m
+[31m-  EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, nonce.size(), nullptr);[m
+[31m-  EVP_DecryptInit_ex(ctx, nullptr, nullptr, key.data(), nonce.data());[m
+[31m-  if(!aad.empty())[m
+[31m-    EVP_DecryptUpdate(ctx, nullptr, nullptr, aad.data(), aad.size());[m
+[31m-[m
+[31m-  std::vector<unsigned char> buf(1<<20), obuf(1<<20);[m
+[31m-  int n, outl;[m
+[31m-  fseek(fi,0,SEEK_END);[m
+[31m-  long total=ftell(fi);[m
+[31m-  fseek(fi,0,SEEK_SET);[m
+[31m-  long dataLen=total-16;[m
+[31m-  if(dataLen<0){ fclose(fi); fclose(fo); EVP_CIPHER_CTX_free(ctx); throw std::runtime_error("cipher too short"); }[m
+[31m-  std::vector<unsigned char> tag(16);[m
+[31m-  fseek(fi,dataLen,SEEK_SET); fread(tag.data(),1,16,fi);[m
+[31m-  fseek(fi,0,SEEK_SET);[m
+[31m-[m
+[31m-  long remain=dataLen;[m
+[32m+[m[32m    { fclose(fi); fclose(fo); EVP_CIPHER_CTX_free(ctx); throw std::runtime_error("dec init"); }[m
+[32m+[m
+[32m+[m[32m  if(1!=EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, 12, nullptr))[m
+[32m+[m[32m    { fclose(fi); fclose(fo); EVP_CIPHER_CTX_free(ctx); throw std::runtime_error("ivlen"); }[m
+[32m+[m
+[32m+[m[32m  if(1!=EVP_DecryptInit_ex(ctx, nullptr, nullptr, key.data(), nonce.data()))[m
+[32m+[m[32m    { fclose(fi); fclose(fo); EVP_CIPHER_CTX_free(ctx); throw std::runtime_error("keyiv"); }[m
+[32m+[m
+[32m+[m[32m  if(!aad.empty()){[m
+[32m+[m[32m    int outl=0;[m
+[32m+[m[32m    if(1!=EVP_DecryptUpdate(ctx, nullptr, &outl, aad.data(), (int)aad.size()))[m
+[32m+[m[32m      { fclose(fi); fclose(fo); EVP_CIPHER_CTX_free(ctx); throw std::runtime_error("aad"); }[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  fseek(fi,0,SEEK_END); long total=ftell(fi); fseek(fi,0,SEEK_SET);[m
+[32m+[m[32m  long dataLen=total-16; if(dataLen<0){ fclose(fi); fclose(fo); EVP_CIPHER_CTX_free(ctx); throw std::runtime_error("cipher too short"); }[m
+[32m+[m[32m  std::vector<unsigned char> tag(16); fseek(fi,dataLen,SEEK_SET); fread(tag.data(),1,16,fi); fseek(fi,0,SEEK_SET);[m
+[32m+[m
+[32m+[m[32m  std::vector<unsigned char> buf(1<<20), obuf(1<<20); long remain=dataLen; int outl=0;[m
+   while(remain>0){[m
+[31m-    size_t r=fread(buf.data(),1,std::min((long)buf.size(),remain),fi);[m
+[31m-    remain-=r;[m
+[31m-    if(1!=EVP_DecryptUpdate(ctx,obuf.data(),&outl,buf.data(),r)){[m
+[31m-      fclose(fi); fclose(fo); EVP_CIPHER_CTX_free(ctx); throw std::runtime_error("dec upd");[m
+[31m-    }[m
+[32m+[m[32m    size_t r=fread(buf.data(),1,std::min<long>((long)buf.size(),remain),fi); remain-=r;[m
+[32m+[m[32m    if(1!=EVP_DecryptUpdate(ctx,obuf.data(),&outl,buf.data(),(int)r))[m
+[32m+[m[32m      { fclose(fi); fclose(fo); EVP_CIPHER_CTX_free(ctx); throw std::runtime_error("dec upd"); }[m
+     if(outl>0) fwrite(obuf.data(),1,outl,fo);[m
+   }[m
+[31m-  EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, 16, tag.data());[m
+[31m-  if(1!=EVP_DecryptFinal_ex(ctx,obuf.data(),&outl)){[m
+[31m-    fclose(fi); fclose(fo); EVP_CIPHER_CTX_free(ctx);[m
+[31m-    throw std::runtime_error("dec final (tag mismatch)");[m
+[31m-  }[m
+[32m+[m
+[32m+[m[32m  if(1!=EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, 16, tag.data()))[m
+[32m+[m[32m    { fclose(fi); fclose(fo); EVP_CIPHER_CTX_free(ctx); throw std::runtime_error("settag"); }[m
+[32m+[m[32m  if(1!=EVP_DecryptFinal_ex(ctx,obuf.data(),&outl))[m
+[32m+[m[32m    { fclose(fi); fclose(fo); EVP_CIPHER_CTX_free(ctx); throw std::runtime_error("dec final (tag mismatch)"); }[m
+   if(outl>0) fwrite(obuf.data(),1,outl,fo);[m
+ [m
+   fclose(fi); fclose(fo); EVP_CIPHER_CTX_free(ctx);[m
+[1mdiff --git a/src/decode.cpp b/src/decode.cpp[m
+[1mindex da67366..2e44a48 100644[m
+[1m--- a/src/decode.cpp[m
+[1m+++ b/src/decode.cpp[m
+[36m@@ -1,12 +1,6 @@[m
+ /*[m
+[31m- * GitZipQR.cpp – Decoder[m
+[31m- * Author: Daniil V (RestlessByte)[https://github.com/RestlessByte][m
+[31m- * License: MIT[m
+[31m- *[m
+[31m- * Reads PNG QR codes, reconstructs encrypted chunks, verifies SHA256, and[m
+[31m- * decrypts via AES-256-GCM to the original file/zip.[m
+[32m+[m[32m * GitZipQR.cpp – Decoder (hardened)[m
+  */[m
+[31m-[m
+ #include "common.hpp"[m
+ #include "config.hpp"[m
+ #include "third_party/json.hpp"[m
+[36m@@ -23,7 +17,6 @@[m
+ using namespace gzqr;[m
+ using mini_json::value;[m
+ [m
+[31m-// ---------------- PNG reader ----------------[m
+ static std::vector<uint8_t> png_rgba(const std::string& p, int& w, int& h){[m
+   FILE* fp=fopen(p.c_str(),"rb"); if(!fp) throw std::runtime_error("open png");[m
+   png_structp png_ptr=png_create_read_struct(PNG_LIBPNG_VER_STRING,nullptr,nullptr,nullptr);[m
+[36m@@ -47,7 +40,6 @@[m [mstatic std::vector<uint8_t> png_rgba(const std::string& p, int& w, int& h){[m
+   png_destroy_read_struct(&png_ptr,&info_ptr,nullptr); fclose(fp); return img;[m
+ }[m
+ [m
+[31m-// ---------------- QR decode ----------------[m
+ static std::string decode_qr(const std::string& path){[m
+   int w=0,h=0; auto rgba=png_rgba(path,w,h);[m
+   ZXing::ImageView iv(rgba.data(),w,h,ZXing::ImageFormat::RGBA);[m
+[36m@@ -56,72 +48,102 @@[m [mstatic std::string decode_qr(const std::string& path){[m
+   return res.isValid()? res.text() : "";[m
+ }[m
+ [m
+[31m-// ---------------- Main ----------------[m
+ int main(int argc, char** argv){[m
+   if(argc<2){ std::fprintf(stderr,"Usage: MakeDecode <qrs_dir> [out_dir]\n"); return 2; }[m
+[31m-  try{[m
+[31m-    std::string indir=argv[1], outdir=(argc>=3?argv[2]:"out");[m
+[31m-    std::filesystem::create_directories(outdir);[m
+[31m-[m
+[31m-    std::fprintf(stdout,"STEP #1 collect data ... ");[m
+[31m-    std::vector<std::string> files;[m
+[31m-    for(auto& e: std::filesystem::directory_iterator(indir))[m
+[31m-      if(e.is_regular_file() && e.path().extension()==".png") files.push_back(e.path().string());[m
+[31m-    if(files.empty()){ std::fprintf(stdout,"[0]\n"); throw std::runtime_error("No QR images"); }[m
+[31m-    std::fprintf(stdout,"[%zu]\n",files.size());[m
+[31m-[m
+[31m-    std::string nameBase="restored", metaExt, cipherSha;[m
+[31m-    std::vector<uint8_t> salt, nonce;[m
+[31m-    int expectedTotal=-1, chunkSize=0;[m
+[31m-    std::map<int,std::vector<uint8_t>> chunks;[m
+[31m-[m
+[31m-    for(auto& f: files){[m
+[31m-      auto txt=decode_qr(f); if(txt.empty()) continue;[m
+[31m-      auto j=value::parse(txt);[m
+[31m-      if(!j.contains("type")) continue;[m
+[31m-      if(j["type"].get<std::string>()!=std::string(gzqr_config::kProjectName)+"-CHUNK-ENC") continue;[m
+[31m-[m
+[31m-      int chunk=(int)j["chunk"].get<double>();[m
+[31m-      int total=(int)j["total"].get<double>();[m
+[31m-      auto data=b64d(j["dataB64"].get<std::string>());[m
+[31m-      if(sha256_hex(data)!=j["hash"].get<std::string>()) continue;[m
+[31m-[m
+[31m-      if(expectedTotal<0) expectedTotal=total;[m
+[31m-      if(chunkSize==0) chunkSize=(int)j["chunkSize"].get<double>();[m
+[31m-      if(cipherSha.empty()) cipherSha=j["cipherHash"].get<std::string>();[m
+[31m-      if(salt.empty()) salt=b64d(j["saltB64"].get<std::string>());[m
+[31m-      if(nonce.empty()) nonce=b64d(j["nonceB64"].get<std::string>());[m
+[31m-      if(nameBase=="restored" && j.contains("name")) nameBase=j["name"].get<std::string>();[m
+[31m-      if(metaExt.empty() && j.contains("ext")) metaExt=j["ext"].get<std::string>();[m
+[31m-[m
+[31m-      chunks[chunk]=data;[m
+[31m-      if(gzqr_config::kPrintProgressCounters)[m
+[31m-        std::fprintf(stdout,"   collected chunk %d/%d\n",chunk+1,total);[m
+[31m-    }[m
+[31m-[m
+[31m-    if((int)chunks.size()!=expectedTotal) throw std::runtime_error("Missing chunks");[m
+[31m-[m
+[31m-    std::string cipherFile=(std::filesystem::temp_directory_path()/ "gzqr-cipher.bin").string();[m
+[31m-    FILE* fc=fopen(cipherFile.c_str(),"wb");[m
+[32m+[m[32m  std::string indir=argv[1], outdir=(argc>=3?argv[2]:"out");[m
+[32m+[m[32m  std::filesystem::create_directories(outdir);[m
+[32m+[m
+[32m+[m[32m  std::fprintf(stdout,"STEP #1 collect data ... ");[m
+[32m+[m[32m  std::vector<std::string> files;[m
+[32m+[m[32m  for(auto& e: std::filesystem::directory_iterator(indir))[m
+[32m+[m[32m    if(e.is_regular_file() && e.path().extension()==".png") files.push_back(e.path().string());[m
+[32m+[m[32m  if(files.empty()){ std::fprintf(stdout,"[0]\n"); throw std::runtime_error("No QR images"); }[m
+[32m+[m[32m  std::fprintf(stdout,"[%zu]\n",files.size());[m
+[32m+[m
+[32m+[m[32m  std::string nameBase="restored", metaExt, cipherSha;[m
+[32m+[m[32m  std::vector<uint8_t> salt, nonce;[m
+[32m+[m[32m  uint64_t kdfN = (1u<<15); uint32_t kdfR=8, kdfP=std::max(1u,std::thread::hardware_concurrency());[m
+[32m+[m[32m  int expectedTotal=-1, chunkSize=0;[m
+[32m+[m[32m  std::map<int,std::vector<uint8_t>> chunks;[m
+[32m+[m
+[32m+[m[32m  for(auto& f: files){[m
+[32m+[m[32m    auto txt=decode_qr(f); if(txt.empty()) continue;[m
+[32m+[m[32m    auto j=value::parse(txt);[m
+[32m+[m[32m    if(!j.contains("type")) continue;[m
+[32m+[m[32m    if(j["type"].get<std::string>()!=std::string(gzqr_config::kProjectName)+"-CHUNK-ENC") continue;[m
+[32m+[m
+[32m+[m[32m    int chunk=(int)j["chunk"].get<double>();[m
+[32m+[m[32m    int total=(int)j["total"].get<double>();[m
+[32m+[m[32m    auto data=b64d(j["dataB64"].get<std::string>());[m
+[32m+[m[32m    if(sha256_hex(data)!=j["hash"].get<std::string>()) continue;[m
+[32m+[m
+[32m+[m[32m    if(expectedTotal<0) expectedTotal=total;[m
+[32m+[m[32m    if(chunkSize==0) chunkSize=(int)j["chunkSize"].get<double>();[m
+[32m+[m[32m    if(cipherSha.empty()) cipherSha=j["cipherHash"].get<std::string>();[m
+[32m+[m[32m    if(salt.empty()) salt=b64d(j["saltB64"].get<std::string>());[m
+[32m+[m[32m    if(nonce.empty()) nonce=b64d(j["nonceB64"].get<std::string>());[m
+[32m+[m[32m    if(j.contains("kdfN")) kdfN=(uint64_t)j["kdfN"].get<double>();[m
+[32m+[m[32m    if(j.contains("kdfR")) kdfR=(uint32_t)j["kdfR"].get<double>();[m
+[32m+[m[32m    if(j.contains("kdfP")) kdfP=(uint32_t)j["kdfP"].get<double>();[m
+[32m+[m[32m    if(nameBase=="restored" && j.contains("name")) nameBase=j["name"].get<std::string>();[m
+[32m+[m[32m    if(metaExt.empty() && j.contains("ext")) metaExt=j["ext"].get<std::string>();[m
+[32m+[m
+[32m+[m[32m    chunks[chunk]=data;[m
+[32m+[m[32m    if(gzqr_config::kPrintProgressCounters)[m
+[32m+[m[32m      std::fprintf(stdout,"   collected chunk %d/%d\n",chunk+1,total);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  if((int)chunks.size()!=expectedTotal) throw std::runtime_error("Missing chunks");[m
+[32m+[m
+[32m+[m[32m  std::string cipherFile = tmp_unique("gzqr-cipher",".bin");[m
+[32m+[m[32m  {[m
+[32m+[m[32m    FILE* fc=fopen(cipherFile.c_str(),"wb"); if(!fc) throw std::runtime_error("open cipher tmp");[m
+     for(auto& [i,d]:chunks) fwrite(d.data(),1,d.size(),fc);[m
+     fclose(fc);[m
+[32m+[m[32m  }[m
+ [m
+[31m-    if(sha256_hex_file(cipherFile)!=cipherSha) throw std::runtime_error("Global sha256 mismatch");[m
+[32m+[m[32m  if(sha256_hex_file(cipherFile)!=cipherSha){[m
+[32m+[m[32m    std::error_code ec; std::filesystem::remove(cipherFile,ec);[m
+[32m+[m[32m    throw std::runtime_error("Global sha256 mismatch");[m
+[32m+[m[32m  }[m
+ [m
+[31m-    std::fprintf(stdout,"STEP #3 decrypt ... ");[m
+[31m-    std::string pass = std::getenv("GZQR_PASS") ? std::getenv("GZQR_PASS") : std::string(gzqr_config::kDefaultPassword);[m
+[31m-    if(pass.size()<8) throw std::runtime_error("Password >=8 required");[m
+[31m-    auto key=scrypt_kdf(pass,salt,{(1u<<15),8u,(uint32_t)std::max(1u,std::thread::hardware_concurrency())});[m
+[32m+[m[32m  std::fprintf(stdout,"STEP #3 decrypt ... ");[m
+ [m
+[31m-    std::string outName=(nameBase.empty()?std::string("restored"):nameBase)+(metaExt.empty()?"":metaExt);[m
+[31m-    std::string outPath=(std::filesystem::path(outdir)/outName).string();[m
+[31m-    aes_gcm_decrypt_file_to_path(cipherFile,outPath,key,nonce,{});[m
+[31m-    std::fprintf(stdout,"[1]\nSTEP #4 write output ... [1]\n");[m
+[31m-    std::filesystem::remove(cipherFile);[m
+[32m+[m[32m  std::string pass;[m
+[32m+[m[32m  try{[m
+[32m+[m[32m    pass = gzqr::prompt_hidden("Enter password (no-echo): ");[m
+[32m+[m[32m  }catch(const std::exception&){[m
+[32m+[m[32m    pass = gzqr_config::getDefaultPassword();[m
+[32m+[m[32m  }[m
+[32m+[m[32m  if(pass.size()<8){[m
+[32m+[m[32m    std::error_code ec; std::filesystem::remove(cipherFile,ec);[m
+[32m+[m[32m    throw std::runtime_error("Password >=8 required");[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  KDFParams kdf{kdfN,kdfR,kdfP};[m
+[32m+[m[32m  auto key = scrypt_kdf(pass,salt,kdf);[m
+[32m+[m
+[32m+[m[32m  std::vector<uint8_t> aad_vec;[m
+[32m+[m[32m  {[m
+[32m+[m[32m    std::string aad = std::string(gzqr_config::kProjectName) + "|" + gzqr_config::kProjectVersion + "|" + nameBase + "|" + metaExt;[m
+[32m+[m[32m    aad_vec.assign(aad.begin(), aad.end());[m
+[32m+[m[32m  }[m
+ [m
+[31m-    std::printf("\n✅ Restored file → %s\n", outPath.c_str());[m
+[31m-    return 0;[m
+[31m-  }catch(const std::exception& e){[m
+[31m-    std::fprintf(stderr,"Error: %s\n",e.what()); return 1;[m
+[32m+[m[32m  std::string outName=(nameBase.empty()?std::string("restored"):nameBase)+(metaExt.empty()?"":metaExt);[m
+[32m+[m[32m  std::string outPath=(std::filesystem::path(outdir)/outName).string();[m
+[32m+[m
+[32m+[m[32m  try{[m
+[32m+[m[32m    aes_gcm_decrypt_file_to_path(cipherFile,outPath,key,nonce,aad_vec);[m
+[32m+[m[32m  }catch(...){[m
+[32m+[m[32m    gzqr::secure_zero(key);[m
+[32m+[m[32m    std::error_code ec; std::filesystem::remove(cipherFile,ec);[m
+[32m+[m[32m    throw;[m
+   }[m
+[32m+[m[32m  gzqr::secure_zero(key);[m
+[32m+[m
+[32m+[m[32m  std::fprintf(stdout,"[1]\nSTEP #4 write output ... [1]\n");[m
+[32m+[m[32m  { std::error_code ec; std::filesystem::remove(cipherFile,ec); }[m
+[32m+[m
+[32m+[m[32m  std::printf("\n✅ Restored file → %s\n", outPath.c_str());[m
+[32m+[m[32m  return 0;[m
+ }[m
+[1mdiff --git a/src/decode_fallback.cpp b/src/decode_fallback.cpp[m
+[1mnew file mode 100644[m
+[1mindex 0000000..ca09271[m
+[1m--- /dev/null[m
+[1m+++ b/src/decode_fallback.cpp[m
+[36m@@ -0,0 +1,8 @@[m
+[32m+[m[32m#include <cstdio>[m
+[32m+[m[32mint main() {[m
+[32m+[m[32m  std::fprintf(stderr,[m
+[32m+[m[32m    "[GitZipQR.cpp] ZXing not found at build time.\n"[m
+[32m+[m[32m    "Install zxing-cpp (library + headers) and rebuild to enable QR decoding.\n"[m
+[32m+[m[32m    "Encode works fine: use ./MakeEncode\n");[m
+[32m+[m[32m  return 2;[m
+[32m+[m[32m}[m
+[1mdiff --git a/src/encode.cpp b/src/encode.cpp[m
+[1mindex 9738c77..4375024 100644[m
+[1m--- a/src/encode.cpp[m
+[1m+++ b/src/encode.cpp[m
+[36m@@ -1,15 +1,6 @@[m
+ /*[m
+[31m- * GitZipQR.cpp – Encoder[m
+[31m- * Author: Daniil V (RestlessByte)[https://github.com/RestlessByte][m
+[31m- * License: MIT[m
+[31m- *[m
+[31m- * Archives (if a directory), encrypts via AES-256-GCM (key from scrypt),[m
+[31m- * splits the encrypted bytes into multiple QR code PNGs.[m
+[31m- *[m
+[31m- * IMPORTANT: Chunk sizing is calibrated against the ACTUAL JSON payload[m
+[31m- * (including base64 + metadata), so "Payload > QR capacity" won't happen.[m
+[32m+[m[32m * GitZipQR.cpp – Encoder (hardened)[m
+  */[m
+[31m-[m
+ #include "common.hpp"[m
+ #include "config.hpp"[m
+ #include "third_party/json.hpp"[m
+[36m@@ -27,11 +18,6 @@[m
+ using namespace gzqr;[m
+ using mini_json::value;[m
+ [m
+[31m-// ---------------- Helpers ----------------[m
+[31m-static bool is_dir(const std::string& p){ return std::filesystem::is_directory(p); }[m
+[31m-static std::string tmpfile(const std::string& prefix){[m
+[31m-  return (std::filesystem::temp_directory_path()/(prefix+std::to_string(std::rand()))).string();[m
+[31m-}[m
+ static int qr_version(){ return gzqr_config::kDefaultQRVersion; }[m
+ static int qr_margin(){  return gzqr_config::kDefaultQRMargin; }[m
+ static int qr_scale(){   return gzqr_config::kDefaultQRScale; }[m
+[36m@@ -40,20 +26,16 @@[m [mstatic int qr_ecl(){[m
+   switch(c){ case 'L': return QR_ECLEVEL_L; case 'M': return QR_ECLEVEL_M; case 'H': return QR_ECLEVEL_H; default: return QR_ECLEVEL_Q; }[m
+ }[m
+ [m
+[31m-// ---------------- Zip input ----------------[m
+[31m-// NOTE: when input is a directory, we (cd) into it and zip "." so the ZIP root[m
+[31m-// contains only the directory contents (no "home/.../folder/" prefix).[m
+[31m-static std::string materialize_data(const std::string& input,std::string& nameBase,std::string& metaExt){[m
+[31m-  if(is_dir(input)){[m
+[32m+[m[32mstatic std::string materialize_data(const std::string& input,std::string& nameBase,std::string& metaExt,bool& wasTempZip){[m
+[32m+[m[32m  wasTempZip=false;[m
+[32m+[m[32m  if(std::filesystem::is_directory(input)){[m
+     auto p=std::filesystem::path(input);[m
+[31m-    std::string base=p.filename().string();[m
+[31m-    if(base.empty()) base=p.parent_path().filename().string();[m
+[31m-    nameBase=base;[m
+[31m-    metaExt=".zip";[m
+[31m-[m
+[31m-    std::string out=tmpfile("gzqr-")+".zip";[m
+[32m+[m[32m    std::string base=p.filename().string(); if(base.empty()) base=p.parent_path().filename().string();[m
+[32m+[m[32m    nameBase=base; metaExt=".zip";[m
+[32m+[m[32m    std::string out=tmp_unique("gzqr-",".zip");[m
+     std::string cmd = std::string("(cd '") + input + "' && zip -r -q '" + out + "' .)";[m
+     if(std::system(cmd.c_str())!=0) throw std::runtime_error("zip failed (install zip)");[m
+[32m+[m[32m    wasTempZip=true;[m
+     return out;[m
+   } else {[m
+     auto p=std::filesystem::path(input);[m
+[36m@@ -63,7 +45,6 @@[m [mstatic std::string materialize_data(const std::string& input,std::string& nameBa[m
+   }[m
+ }[m
+ [m
+[31m-// ---------------- PNG writer ----------------[m
+ static void write_qr_png(const std::string& out,QRcode* qrcode,int margin,int scale){[m
+   if(!qrcode) throw std::runtime_error("QRcode is null");[m
+   const int qsize=qrcode->width;[m
+[36m@@ -95,16 +76,11 @@[m [mstatic void write_qr_png(const std::string& out,QRcode* qrcode,int margin,int sc[m
+   png_destroy_write_struct(&png_ptr,&info_ptr); fclose(fp);[m
+ }[m
+ [m
+[31m-// ---------------- Capacity probing ----------------[m
+ static bool payload_fits(const std::string& payload,int version,int ecl){[m
+   QRcode* q=QRcode_encodeData((int)payload.size(),(const unsigned char*)payload.data(),version,(QRecLevel)ecl);[m
+   if(!q) return false; QRcode_free(q); return true;[m
+ }[m
+ [m
+[31m-/*[m
+[31m- * Realistic capacity calibration:[m
+[31m- * Build payload identical to real one and probe the QR capacity.[m
+[31m- */[m
+ static int max_data_bytes_per_chunk(int version,int ecl,[m
+                                     const std::string& nameBase,[m
+                                     const std::string& metaExt)[m
+[36m@@ -132,6 +108,9 @@[m [mstatic int max_data_bytes_per_chunk(int version,int ecl,[m
+     meta["cipherHash"] = fakeCipherSha;[m
+     meta["saltB64"]    = saltB64;[m
+     meta["nonceB64"]   = nonceB64;[m
+[32m+[m[32m    meta["kdfN"]       = (double)(1u<<15);[m
+[32m+[m[32m    meta["kdfR"]       = (double)8u;[m
+[32m+[m[32m    meta["kdfP"]       = (double)std::max(1u,std::thread::hardware_concurrency());[m
+     meta["name"]       = nameBase;[m
+     meta["ext"]        = metaExt;[m
+     meta["chunkSize"]  = (double)worstChunkSize;[m
+[36m@@ -143,80 +122,100 @@[m [mstatic int max_data_bytes_per_chunk(int version,int ecl,[m
+     int mid = (lo + hi + 1)/2;[m
+     if(fits(mid)) lo = mid; else hi = mid - 1;[m
+   }[m
+[31m-  return std::max(16, lo - 16); // safety headroom[m
+[32m+[m[32m  return std::max(16, lo - 16);[m
+ }[m
+ [m
+[31m-// ---------------- Main ----------------[m
+ int main(int argc,char** argv){[m
+   if(argc<2){ std::fprintf(stderr,"Usage: MakeEncode <input_file_or_dir> [output_dir]\n"); return 2; }[m
+[32m+[m[32m  std::string input=argv[1];[m
+[32m+[m[32m  std::string outdir=argc>=3?argv[2]:"qrcodes";[m
+[32m+[m[32m  std::filesystem::create_directories(outdir);[m
+[32m+[m
+[32m+[m[32m  std::string pass;[m
+   try{[m
+[31m-    std::srand((unsigned)time(nullptr));[m
+[31m-    std::string input=argv[1];[m
+[31m-    std::string outdir=argc>=3?argv[2]:"qrcodes";[m
+[31m-    std::filesystem::create_directories(outdir);[m
+[31m-[m
+[31m-    // 1) Password (from config; override with GZQR_PASS if set)[m
+[31m-    std::string pass = std::getenv("GZQR_PASS") ? std::getenv("GZQR_PASS") : std::string(gzqr_config::kDefaultPassword);[m
+[31m-    if(pass.size()<8) throw std::runtime_error("Password >=8 required");[m
+[31m-[m
+[31m-    // 2) Prepare data[m
+[31m-    std::fprintf(stdout,"STEP #2 prepare data ... ");[m
+[31m-    std::string nameBase,metaExt; std::string dataPath=materialize_data(input,nameBase,metaExt);[m
+[31m-    std::fprintf(stdout,"[1]\n");[m
+[31m-[m
+[31m-    // 3) Encrypt[m
+[31m-    std::fprintf(stdout,"STEP #3 encrypt ... ");[m
+[31m-    std::vector<uint8_t> salt(16),nonce(12); RAND_bytes(salt.data(),16); RAND_bytes(nonce.data(),12);[m
+[31m-    KDFParams kdf{(1u<<15),8u,(uint32_t)std::max(1u,std::thread::hardware_concurrency())};[m
+[31m-    auto key=scrypt_kdf(pass,salt,kdf);[m
+[31m-    std::string encPath=tmpfile("payload-")+".enc"; aes_gcm_encrypt_file(dataPath,encPath,key,nonce,{});[m
+[31m-    std::string cipherSha=sha256_hex_file(encPath); std::fprintf(stdout,"[1]\n");[m
+[31m-[m
+[31m-    // 4) Chunk & Encode[m
+[31m-    const int ECL=qr_ecl(),QVER=qr_version(),MARGIN=qr_margin(),SCALE=qr_scale();[m
+[31m-    FILE* f=fopen(encPath.c_str(),"rb"); if(!f) throw std::runtime_error("open enc");[m
+[31m-    fseek(f,0,SEEK_END); long sz=ftell(f); fseek(f,0,SEEK_SET);[m
+[31m-[m
+[31m-    int chunk_size = max_data_bytes_per_chunk(QVER,ECL,nameBase,metaExt);[m
+[31m-    if(chunk_size < 64) chunk_size = 64;[m
+[31m-    int total=(int)((sz+chunk_size-1)/chunk_size);[m
+[31m-[m
+[31m-    std::fprintf(stdout,"STEP #4 chunk & encode QR ... (chunkSize=%d total=%d)\n",chunk_size,total);[m
+[31m-    std::vector<uint8_t> buf(chunk_size);[m
+[31m-[m
+[31m-    for(int i=0;i<total;i++){[m
+[31m-      size_t rd=fread(buf.data(),1,chunk_size,f);[m
+[31m-      std::vector<uint8_t> view(buf.begin(),buf.begin()+rd);[m
+[31m-[m
+[31m-      std::map<std::string,value> meta;[m
+[31m-      meta["type"]=std::string(gzqr_config::kProjectName)+"-CHUNK-ENC";[m
+[31m-      meta["version"]=gzqr_config::kProjectVersion;[m
+[31m-      meta["chunk"]=(double)i;[m
+[31m-      meta["total"]=(double)total;[m
+[31m-      meta["hash"]=sha256_hex(view);[m
+[31m-      meta["cipherHash"]=cipherSha;[m
+[31m-      meta["saltB64"]=b64(salt);[m
+[31m-      meta["nonceB64"]=b64(nonce);[m
+[31m-      meta["name"]=nameBase;[m
+[31m-      meta["ext"]=metaExt;[m
+[31m-      meta["chunkSize"]=(double)chunk_size;[m
+[31m-      meta["dataB64"]=b64(view);[m
+[31m-[m
+[31m-      std::string payload=value(meta).dump();[m
+[31m-      if(!payload_fits(payload,QVER,ECL)){ fclose(f); throw std::runtime_error("Internal error: calibrated payload did not fit"); }[m
+[31m-[m
+[31m-      char fn[64]; std::snprintf(fn,sizeof(fn),"qr-%06d.png",i);[m
+[31m-      QRcode* q=QRcode_encodeString(payload.c_str(),QVER,(QRecLevel)ECL,QR_MODE_8,1);[m
+[31m-      write_qr_png((std::filesystem::path(outdir)/fn).string(),q,MARGIN,SCALE);[m
+[31m-      QRcode_free(q);[m
+[31m-[m
+[31m-      if(gzqr_config::kPrintProgressCounters)[m
+[31m-        std::fprintf(stdout,"   chunk %d/%d written\n",i+1,total);[m
+[31m-    }[m
+[31m-    fclose(f);[m
+[31m-    std::printf("\n✅ Done. Chunks: %d → %s\n",total,outdir.c_str());[m
+[31m-    return 0;[m
+[31m-  }catch(const std::exception& e){[m
+[31m-    std::fprintf(stderr,"Error: %s\n",e.what()); return 1;[m
+[32m+[m[32m    pass = gzqr::prompt_hidden("Enter password (no-echo): ");[m
+[32m+[m[32m  }catch(const std::exception&){[m
+[32m+[m[32m    pass = gzqr_config::getDefaultPassword();[m
+[32m+[m[32m  }[m
+[32m+[m[32m  if(pass.size()<8) throw std::runtime_error("Password >=8 required");[m
+[32m+[m
+[32m+[m[32m  bool cleanup_zip=false;[m
+[32m+[m[32m  std::string nameBase,metaExt;[m
+[32m+[m[32m  std::string dataPath = materialize_data(input,nameBase,metaExt,cleanup_zip);[m
+[32m+[m
+[32m+[m[32m  std::vector<uint8_t> salt(16),nonce(12);[m
+[32m+[m[32m  RAND_bytes(salt.data(),16); RAND_bytes(nonce.data(),12);[m
+[32m+[m[32m  KDFParams kdf{(1u<<15),8u,(uint32_t)std::max(1u,std::thread::hardware_concurrency())};[m
+[32m+[m[32m  auto key=scrypt_kdf(pass,salt,kdf);[m
+[32m+[m[32m  std::vector<uint8_t> aad_vec;[m
+[32m+[m[32m  {[m
+[32m+[m[32m    std::string aad = std::string(gzqr_config::kProjectName) + "|" + gzqr_config::kProjectVersion + "|" + nameBase + "|" + metaExt;[m
+[32m+[m[32m    aad_vec.assign(aad.begin(), aad.end());[m
+   }[m
+[32m+[m[32m  std::string encPath=tmp_unique("payload-",".enc");[m
+[32m+[m[32m  try{[m
+[32m+[m[32m    aes_gcm_encrypt_file(dataPath,encPath,key,nonce,aad_vec);[m
+[32m+[m[32m  }catch(...){[m
+[32m+[m[32m    gzqr::secure_zero(key);[m
+[32m+[m[32m    if(cleanup_zip) { std::error_code ec; std::filesystem::remove(dataPath,ec); }[m
+[32m+[m[32m    throw;[m
+[32m+[m[32m  }[m
+[32m+[m[32m  gzqr::secure_zero(key);[m
+[32m+[m
+[32m+[m[32m  std::string cipherSha=sha256_hex_file(encPath);[m
+[32m+[m
+[32m+[m[32m  const int ECL=qr_ecl(),QVER=qr_version(),MARGIN=qr_margin(),SCALE=qr_scale();[m
+[32m+[m[32m  FILE* f=fopen(encPath.c_str(),"rb"); if(!f) {[m
+[32m+[m[32m    if(cleanup_zip){ std::error_code ec; std::filesystem::remove(dataPath,ec); }[m
+[32m+[m[32m    std::error_code ec; std::filesystem::remove(encPath,ec);[m
+[32m+[m[32m    throw std::runtime_error("open enc");[m
+[32m+[m[32m  }[m
+[32m+[m[32m  fseek(f,0,SEEK_END); long sz=ftell(f); fseek(f,0,SEEK_SET);[m
+[32m+[m
+[32m+[m[32m  int chunk_size = max_data_bytes_per_chunk(QVER,ECL,nameBase,metaExt);[m
+[32m+[m[32m  if(chunk_size < 64) chunk_size = 64;[m
+[32m+[m[32m  int total=(int)((sz+chunk_size-1)/chunk_size);[m
+[32m+[m
+[32m+[m[32m  std::fprintf(stdout,"STEP #4 chunk & encode QR ... (chunkSize=%d total=%d)\n",chunk_size,total);[m
+[32m+[m[32m  std::vector<uint8_t> buf(chunk_size);[m
+[32m+[m
+[32m+[m[32m  for(int i=0;i<total;i++){[m
+[32m+[m[32m    size_t rd=fread(buf.data(),1,chunk_size,f);[m
+[32m+[m[32m    std::vector<uint8_t> view(buf.begin(),buf.begin()+rd);[m
+[32m+[m
+[32m+[m[32m    std::map<std::string,value> meta;[m
+[32m+[m[32m    meta["type"]=std::string(gzqr_config::kProjectName)+"-CHUNK-ENC";[m
+[32m+[m[32m    meta["version"]=gzqr_config::kProjectVersion;[m
+[32m+[m[32m    meta["chunk"]=(double)i;[m
+[32m+[m[32m    meta["total"]=(double)total;[m
+[32m+[m[32m    meta["hash"]=sha256_hex(view);[m
+[32m+[m[32m    meta["cipherHash"]=cipherSha;[m
+[32m+[m[32m    meta["saltB64"]=b64(salt);[m
+[32m+[m[32m    meta["nonceB64"]=b64(nonce);[m
+[32m+[m[32m    meta["kdfN"]=(double)kdf.N;[m
+[32m+[m[32m    meta["kdfR"]=(double)kdf.r;[m
+[32m+[m[32m    meta["kdfP"]=(double)kdf.p;[m
+[32m+[m[32m    meta["name"]=nameBase;[m
+[32m+[m[32m    meta["ext"]=metaExt;[m
+[32m+[m[32m    meta["chunkSize"]=(double)chunk_size;[m
+[32m+[m[32m    meta["dataB64"]=b64(view);[m
+[32m+[m
+[32m+[m[32m    std::string payload=value(meta).dump();[m
+[32m+[m[32m    if(!payload_fits(payload,QVER,ECL)){ fclose(f); throw std::runtime_error("Internal error: calibrated payload did not fit"); }[m
+[32m+[m
+[32m+[m[32m    char fn[64]; std::snprintf(fn,sizeof(fn),"qr-%06d.png",i);[m
+[32m+[m[32m    QRcode* q=QRcode_encodeString(payload.c_str(),QVER,(QRecLevel)ECL,QR_MODE_8,1);[m
+[32m+[m[32m    write_qr_png((std::filesystem::path(outdir)/fn).string(),q,MARGIN,SCALE);[m
+[32m+[m[32m    QRcode_free(q);[m
+[32m+[m
+[32m+[m[32m    if(gzqr_config::kPrintProgressCounters)[m
+[32m+[m[32m      std::fprintf(stdout,"   chunk %d/%d written\n",i+1,total);[m
+[32m+[m[32m  }[m
+[32m+[m[32m  fclose(f);[m
+[32m+[m
+[32m+[m[32m  if(cleanup_zip){ std::error_code ec; std::filesystem::remove(dataPath,ec); }[m
+[32m+[m[32m  { std::error_code ec; std::filesystem::remove(encPath,ec); }[m
+[32m+[m
+[32m+[m[32m  std::printf("\n✅ Done. Chunks: %d → %s\n",total,outdir.c_str());[m
+[32m+[m[32m  return 0;[m
+ }[m
+[1mdiff --git a/third_party/json.hpp b/third_party/json.hpp[m
+[1mindex dd26d19..d96624d 100644[m
+[1m--- a/third_party/json.hpp[m
+[1m+++ b/third_party/json.hpp[m
+[36m@@ -1,79 +1,3 @@[m
+ #pragma once[m
+[31m-#include <string>[m
+[31m-#include <map>[m
+[31m-#include <vector>[m
+[31m-#include <variant>[m
+[31m-#include <stdexcept>[m
+[31m-#include <sstream>[m
+[31m-#include <cctype>[m
+[31m-namespace mini_json {[m
+[31m-  struct value {[m
+[31m-    using var = std::variant<std::nullptr_t, bool, double, std::string,[m
+[31m-                             std::map<std::string, value>, std::vector<value>>;[m
+[31m-    var v; value():v(nullptr){} value(const char*s):v(std::string(s)){} value(const std::string&s):v(s){}[m
+[31m-    value(double d):v(d){} value(bool b):v(b){} value(const std::map<std::string,value>&o):v(o){}[m
+[31m-    value(const std::vector<value>&a):v(a){}[m
+[31m-    bool is_obj()const{return std::holds_alternative<std::map<std::string,value>>(v);}[m
+[31m-    bool is_arr()const{return std::holds_alternative<std::vector<value>>(v);}[m
+[31m-    bool is_str()const{return std::holds_alternative<std::string>(v);}[m
+[31m-    bool is_num()const{return std::holds_alternative<double>(v);}[m
+[31m-    bool is_bool()const{return std::holds_alternative<bool>(v);}[m
+[31m-    std::map<std::string,value>& obj(){return std::get<std::map<std::string,value>>(v);}[m
+[31m-    const std::map<std::string,value>& obj()const{return std::get<std::map<std::string,value>>(v);}[m
+[31m-    std::vector<value>& arr(){return std::get<std::vector<value>>(v);}[m
+[31m-    const std::vector<value>& arr()const{return std::get<std::vector<value>>(v);}[m
+[31m-    std::string& str(){return std::get<std::string>(v);}[m
+[31m-    const std::string& str()const{return std::get<std::string>(v);}[m
+[31m-    double num()const{return std::get<double>(v);} bool boolean()const{return std::get<bool>(v);}[m
+[31m-    value& operator[](const std::string&k){return obj()[k];}[m
+[31m-    const value& operator[](const std::string&k)const{return obj().at(k);}[m
+[31m-    bool contains(const std::string&k)const{return is_obj()&&obj().count(k);}[m
+[31m-    template<typename T> T get() const;[m
+[31m-    std::string dump()const{ std::ostringstream o; dump_into(o); return o.str(); }[m
+[31m-    static value parse(const std::string&s){ size_t i=0; return parse_any(s,i); }[m
+[31m-  private:[m
+[31m-    static void skipws(const std::string&s,size_t&i){ while(i<s.size()&&std::isspace((unsigned char)s[i])) ++i; }[m
+[31m-    static value parse_any(const std::string&s,size_t&i){[m
+[31m-      skipws(s,i); if(i>=s.size()) throw std::runtime_error("json eof");[m
+[31m-      if(s[i]=='{') return parse_obj(s,i); if(s[i]=='[') return parse_arr(s,i);[m
+[31m-      if(s[i]=='"') return parse_str(s,i);[m
+[31m-      if(std::isdigit((unsigned char)s[i])||s[i]=='-') return parse_num(s,i);[m
+[31m-      if(s.compare(i,4,"true")==0){i+=4;return value(true);} if(s.compare(i,5,"false")==0){i+=5;return value(false);}[m
+[31m-      if(s.compare(i,4,"null")==0){i+=4;return value();} throw std::runtime_error("json parse");[m
+[31m-    }[m
+[31m-    static value parse_obj(const std::string&s,size_t&i){[m
+[31m-      std::map<std::string,value> o; ++i; skipws(s,i); if(s[i]=='}'){++i;return value(o);}[m
+[31m-      while(true){ auto k=parse_str(s,i).str(); skipws(s,i); if(s[i++]!=':') throw std::runtime_error(":");[m
+[31m-        auto v=parse_any(s,i); o.emplace(k,std::move(v)); skipws(s,i);[m
+[31m-        if(s[i]=='}'){++i;break;} if(s[i++]!=',') throw std::runtime_error(",");[m
+[31m-      } return value(o);[m
+[31m-    }[m
+[31m-    static value parse_arr(const std::string&s,size_t&i){[m
+[31m-      std::vector<value>a; ++i; skipws(s,i); if(s[i]==']'){++i;return value(a);}[m
+[31m-      while(true){ a.push_back(parse_any(s,i)); skipws(s,i);[m
+[31m-        if(s[i]==']'){++i;break;} if(s[i++]!=',') throw std::runtime_error(",");[m
+[31m-      } return value(a);[m
+[31m-    }[m
+[31m-    static value parse_str(const std::string&s,size_t&i){[m
+[31m-      if(s[i]!='"') throw std::runtime_error("\""); ++i; std::string r;[m
+[31m-      while(i<s.size()&&s[i]!='"'){ if(s[i]=='\\'){ ++i; if(i<s.size()) r.push_back(s[i++]); } else r.push_back(s[i++]); }[m
+[31m-      if(i>=s.size()||s[i]!='"') throw std::runtime_error("unterminated string"); ++i; return value(r);[m
+[31m-    }[m
+[31m-    static value parse_num(const std::string&s,size_t&i){[m
+[31m-      size_t j=i; while(j<s.size()&&(std::isdigit((unsigned char)s[j])||s[j]=='-'||s[j]=='+'||s[j]=='.'||s[j]=='e'||s[j]=='E')) ++j;[m
+[31m-      double d=std::stod(s.substr(i,j-i)); i=j; return value(d);[m
+[31m-    }[m
+[31m-    void dump_into(std::ostringstream&o)const{[m
+[31m-      if(std::holds_alternative<std::nullptr_t>(v)){o<<"null";return;}[m
+[31m-      if(is_bool()){o<<(boolean()?"true":"false");return;}[m
+[31m-      if(is_num()){o<<num();return;}[m
+[31m-      if(is_str()){o<<'"';for(char c:str()){ if(c=='"'||c=='\\')o<<'\\'<<c; else o<<c;}o<<'"';return;}[m
+[31m-      if(is_arr()){o<<'[';bool f=1;for(auto&e:arr()){if(!f)o<<',';f=0;e.dump_into(o);}o<<']';return;}[m
+[31m-      if(is_obj()){o<<'{';bool f=1;for(auto&kv:obj()){if(!f)o<<',';f=0;o<<'"'<<kv.first<<'"'<<':';kv.second.dump_into(o);}o<<'}';return;}[m
+[31m-    }[m
+[31m-  };[m
+[31m-  template<> inline std::string value::get<std::string>()const{return str();}[m
+[31m-  template<> inline int         value::get<int>()const{return (int)num();}[m
+[31m-  template<> inline double      value::get<double>()const{return num();}[m
+[31m-  template<> inline bool        value::get<bool>()const{return boolean();}[m
+[31m-}[m
+[32m+[m[32m#include <nlohmann/json.hpp>[m
+[32m+[m[32mnamespace mini_json { using value = nlohmann::json; }[m
