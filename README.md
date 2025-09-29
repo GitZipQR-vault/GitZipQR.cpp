@@ -1,4 +1,12 @@
-# GitZipQR-CPP — QR-based encrypted backup tool 📦🔐📱
+#  GitZipQR.v3.5 — encrypted you data and share secure with people in QR codes 📦🔐📱
+# 🧪 Test
+```
+------
+2 files [290,5 Kib, 636,4 KiB=926,9] 
+Folder where throw files = 930 KiB
+Total: 421 QR codes in folder [12,4 MiB]
+------
+```
 # [TypeScript code - prototype,dev](https://github.com/RestlessByte/GitZipQR.ts)
 ![GitZipQR Structure](https://github.com/RestlessByte/GitZipQR/blob/main/assets/structures/structures.png)
 Turns any file or folder into **encrypted QR codes** and restores them back.  
