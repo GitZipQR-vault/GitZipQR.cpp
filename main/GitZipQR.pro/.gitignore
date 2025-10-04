@@ -57,7 +57,7 @@ build/Release
 
 # Dependency directories
 backup.pdf
-node_modules/
+# node_modules/
 jspm_packages/
 
 # Snowpack dependency directory (https://snowpack.dev/)
