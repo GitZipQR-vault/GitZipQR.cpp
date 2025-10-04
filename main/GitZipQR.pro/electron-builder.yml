@@ -1,0 +1,18 @@
+appId: com.gitzipqr.pro
+productName: GitZipQR Pro
+files:
+  - "packages/app/dist/**"
+  - "packages/ui/.next/**"
+  - "packages/app/mainproc/**"
+  - "logoGitZipQR.jpg"
+extraResources:
+  - from: GitZipQR.cpp/build
+    to: GitZipQR.cpp/build
+linux:
+  target:
+    - AppImage
+  category: Utility
+  icon: logoGitZipQR.jpg
+asar: false
+directories:
+  buildResources: .

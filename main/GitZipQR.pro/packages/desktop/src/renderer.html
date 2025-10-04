@@ -1,0 +1,307 @@
+"use client";
+import { useEffect, useState } from "react";
+
+type TokenCfg = { label: string; token: string; decimals: number; minAmount: number; cg: string; receiver?: string;
+network?: string };
+const DEFAULT_TOKENS: TokenCfg[] = [
+{ label: "ETH (native)", token: "eth", decimals: 18, minAmount: 1500, cg: "ethereum", network: "ethereum" },
+{ label: "USDT (ERC20)", token: (process.env.NEXT_PUBLIC_USDT_ERC20 || "0xdAC17F958D2ee523a2206206994597C13D831ec7"),
+decimals: 6, minAmount: 1500, cg: "tether", network: "ethereum" },
+{ label: "BTC", token: "btc", decimals: 8, minAmount: 1500, cg: "bitcoin", network: "bitcoin" },
+{ label: "XMR", token: "xmr", decimals: 12, minAmount: 1500, cg: "monero", network: "monero" },
+];
+const TOKENS: TokenCfg[] = (() => { try { const j = JSON.parse(process.env.NEXT_PUBLIC_TOKENS_JSON || "null"); if
+(Array.isArray(j)) return j; } catch { } return DEFAULT_TOKENS; })();
+
+type Plan = "oss" | "pro";
+type Lang = "en" | "ru";
+const T: any = {
+en: {
+language: "Language", oss: "OSS (Free)", pro: "PRO", prices: "Market (hourly)", floor: "Minimum price (USDT)", token:
+"Token", verify: "Verify",
+pass: "Password", must: "Password must be ≥ 20 chars", enc: "Encrypt → QR", dec: "Decrypt from QR", pick: "Browse…",
+selected: "Selected", dropFile: "Click/Drop a file or folder", outName: "Output name", runEncode: "Run Encode", cancel:
+"Cancel",
+openPdf: "Open PDF", showInFolder: "Show in folder", dropPng: "Click/Drop a PNG folder", dropPdf: "Click/Drop a PDF",
+browsePdf: "Browse… PDF", collect: "Assemble & Decrypt", logs: "Logs", bindPhoto: "Bind to photo", choosePhoto: "Choose
+photo",
+photoSelected: "Photo:", tx: "Tx hash (0x… or any id)", credits: "Credits", uptime: "Uptime",
+},
+ru: {
+language: "Язык", oss: "OSS (Бесплатно)", pro: "PRO", prices: "Курсы (раз в час)", floor: "Минимальная цена (USDT)",
+token: "Токен", verify: "Проверить",
+pass: "Пароль", must: "Пароль ≥ 20 символов", enc: "Шифрование → QR", dec: "Расшифровка из QR", pick: "Выбрать…",
+selected: "Выбрано", dropFile: "Клик/Перетащите файл или папку", outName: "Имя выходной папки", runEncode: "Запустить
+шифрование",
+cancel: "Отмена", openPdf: "Открыть PDF", showInFolder: "Показать в папке", dropPng: "Клик/Перетащите папку PNG",
+dropPdf: "Клик/Перетащите PDF", browsePdf: "Выбрать… PDF", collect: "Собрать и Расшифровать", logs: "Логи",
+bindPhoto: "Привязать к фото", choosePhoto: "Выбрать фото", photoSelected: "Фото:", tx: "Tx hash (0x… или любой id)",
+credits: "Кредиты", uptime: "Время работы",
+}
+};
+
+function useIPC(ch: string) { return async (payload?: any) => await (window as any)?.electron?.ipc?.invoke?.(ch,
+payload); }
+function Progress({ value }: { value: number }) {
+const v = Math.max(0, Math.min(100, value | 0)); return (
+<div>
+  <div style={{ position: "relative" , height: 10, background: "#1b1f2a" , borderRadius: 8, overflow: "hidden" }}><span
+      style={{ position: "absolute" , inset: "0 100% 0 0" , background: "#2ecc71" , width: `${v}%`,
+      transition: "width .2s" }} /></div>
+  <div style={{ marginTop: 6, fontSize: 12 }}>{v}%</div>
+</div>
+);
+}
+function fmtUptime(sec: number) { const h = (sec / 3600) | 0, m = ((sec % 3600) / 60) | 0; return `${h}h ${m}m`; }
+
+export default function Page() {
+const [lang, setLang] = useState<Lang>("ru"); const tr = T[lang];
+  const [plan, setPlan] = useState<Plan>("oss");
+    const hasIPC = typeof window !== "undefined" && Boolean((window as any)?.electron?.ipc);
+
+    const [pass, setPass] = useState(""); const [showPass, setShowPass] = useState(false); const passOk = pass.length >=
+    20;
+    const [encIn, setEncIn] = useState(""); const [outName, setOutName] = useState("");
+    const [pngDir, setPngDir] = useState(""); const [pdf, setPdf] = useState(""); const [pEnc, setPEnc] = useState(0);
+    const [pDec, setPDec] = useState(0);
+    const [logs, setLogs] = useState("—");
+    const [bindPhoto, setBindPhoto] = useState(false); const [photoPath, setPhotoPath] = useState("");
+
+    const [credits, setCredits] = useState(0); const [bonusLeft, setBonusLeft] = useState(0); const [bonusSec,
+    setBonusSec] = useState(0); const [uptime, setUptime] = useState(0);
+
+    useEffect(() => {
+    (async () => {
+    try {
+    const c = await (window as any).gzqrExtra?.creditsGet?.(); if (c?.ok) { setCredits(c.credits || 0);
+    setBonusLeft(c.bonusLeft || 0); setBonusSec(c.bonusExpireSec || 0); }
+    const u = await (window as any).gzqrExtra?.uptimeGet?.(); if (u?.ok) setUptime(u.sec || 0);
+    } catch { }
+    })();
+    const t = setInterval(async () => { try { const u = await (window as any).gzqrExtra?.uptimeGet?.(); if (u?.ok)
+    setUptime(u.sec || 0); const c = await (window as any).gzqrExtra?.creditsGet?.(); if (c?.ok) {
+    setBonusLeft(c.bonusLeft || 0); setBonusSec(c.bonusExpireSec || 0); } } catch { } }, 60 * 1000);
+    return () => clearInterval(t);
+    }, []);
+
+    useEffect(() => {
+    if (!hasIPC) return; const off = (window as any).electron?.ipc?.onProgress?.((d: any) => {
+    setLogs(p => p === "—" ? d.line : (p + "\n" + d.line));
+    let m = d.line.match(/chunk\s+(\d+)\/(\d+)/i); if (m) setPEnc(Math.floor(+m[1] * 100 / +m[2]));
+    m = d.line.match(/collected chunk\s+(\d+)\/(\d+)/i); if (m) setPDec(Math.floor(+m[1] * 100 / +m[2]));
+    }); return () => { try { off?.(); } catch { } };
+    }, [hasIPC]);
+
+    // prices
+    type PriceState = { [id: string]: { usdt: number; dir: "up" | "down" | "same" } };
+    const [prices, setPrices] = useState<PriceState>({}); const [floor, setFloor] = useState(1500);
+      useEffect(() => {
+      try {
+      const ids = [...new Set(TOKENS.map(t => t.cg).filter(Boolean))];
+      (window as any).gzqrExtra?.priceSubscribe?.(ids);
+      const unsub = (window as any).api?.onPrice?.((p: any) => { if (p?.data) setPrices(p.data); if (typeof p?.floorUsdt
+      === "number") setFloor(p.floorUsdt); });
+      return () => { try { unsub?.(); } catch { } };
+      } catch { }
+      }, []);
+
+      const [tokIdx, setTokIdx] = useState(0); const [txHash, setTxHash] = useState("");
+      const totalCredits = credits + bonusLeft;
+      const canEncode = passOk && !!encIn && (plan !== "pro" || totalCredits > 0) && (!bindPhoto || !!photoPath);
+      const canDecode = passOk && !!pngDir && (!bindPhoto || !!photoPath);
+
+      const ipcPick = useIPC("file.pickPath"); const ipcEnc = useIPC("encoder.run"); const ipcDec =
+      useIPC("decoder.run"); const ipcOpen = useIPC("file.openPath"); const ipcShow = useIPC("file.showInFolder"); const
+      ipcPdf = useIPC("pdf.toPngs");
+
+      return <div style={{ display: "grid" , gap: 14, maxWidth: 980, margin: "16px auto" , color: "#eaeaf0" ,
+        fontFamily: "Inter, system-ui, sans-serif" }}>
+        <div style={{ display: "flex" , justifyContent: "space-between" , alignItems: "center" }}>
+          <h1>GitZipQR Pro</h1>
+          <div style={{ display: "flex" , gap: 12, alignItems: "center" }}>
+            <div className="tag"> {tr.credits}: <b>{totalCredits}</b> <small style={{ opacity: .75 }}>({bonusLeft}
+                bonus, {fmtUptime(uptime)})</small></div>
+            <div>{tr.language}:
+              <button className="tag" onClick={()=> { setLang("en"); }}>🇬🇧</button>
+              <button className="tag" onClick={()=> { setLang("ru"); }}>🇷🇺</button>
+            </div>
+            <div>
+              <button className="tag" onClick={()=> { setPlan("oss"); }}>OSS</button>
+              <button className="tag" onClick={()=> { setPlan("pro"); }}>PRO</button>
+            </div>
+          </div>
+        </div>
+
+        {/* Prices */}
+        <div className="card">
+          <div style={{ display: "flex" , justifyContent: "space-between" , alignItems: "center" , marginBottom: 8 }}>
+            <h3>{tr.prices}</h3>
+            <div>{tr.floor}: <b>{floor} USDT</b></div>
+          </div>
+          <div style={{ display: "grid" , gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))" , gap: 10 }}>
+            {TOKENS.map((t, i) => {
+            const p = prices[t.cg]; const val = p?.usdt || 0; const dir = p?.dir || "same";
+            const cls = dir === "up" ? "#2ecc71" : dir === "down" ? "#e74c3c" : "#eaeaf0";
+            const need = Math.max(floor, t.minAmount || floor); const amount = val > 0 ? (need / val) : 0;
+            return <div key={i} className="tag" style={{ display: "grid" , gap: 4 }}>
+              <div style={{ display: "flex" , justifyContent: "space-between" }}><b>{t.label}</b><span style={{ color:
+                  cls }}>{dir === "up" ? "▲" : dir === "down" ? "▼" : "—"}</span></div>
+              <div style={{ fontSize: 12, opacity: .9 }}>≈ <b>{val.toFixed(4)}</b> USDT</div>
+              <div style={{ fontSize: 12 }}>Pay ≥ <b>{need}</b> USDT (≈ {amount > 0 ? amount.toFixed(6) : "—"}
+                {t.label.split(" ")[0]})</div>
+            </div>;
+            })}
+          </div>
+        </div>
+
+        {/* Payments */}
+        <div className="card" style={{ display: "grid" , gap: 10 }}>
+          <div style={{ display: "flex" , gap: 10, flexWrap: "wrap" , alignItems: "center" }}>
+            <div>{tr.token}:</div>
+            <select value={tokIdx} onChange={e=> setTokIdx(parseInt(e.target.value, 10))} style={{ background:
+              "#0f1117", color: "#eaeaf0", border: "1px solid #2a2f3a", borderRadius: 8, padding: "6px 8px" }}>
+              {TOKENS.map((t, i) => <option key={i} value={i}>{t.label}</option>)}
+            </select>
+          </div>
+          <div style={{ display: "flex" , gap: 8, flexWrap: "wrap" , alignItems: "center" }}>
+            <input placeholder={tr.tx} value={txHash} onChange={e=> setTxHash(e.target.value)} style={{ width: 360,
+            background: "#0f1117", color: "#eaeaf0", border: "1px solid #2a2f3a", borderRadius: 8, padding: "6px 8px" }}
+            />
+            <button onClick={async ()=> {
+              try {
+              const t = TOKENS[tokIdx]; const p = prices[t.cg]; const val = p?.usdt || 0; const need = Math.max(floor,
+              t.minAmount || floor);
+              if (val <= 0) { alert("Price feed unavailable"); return; } const r=await (window as
+                any).gzqrExtra?.payVerify?.(txHash, t.token, t.decimals, need, t.receiver, t.network || "" ); if (r?.ok)
+                { const cc=await (window as any).gzqrExtra?.creditsConsume?.(1); if (cc) { alert(r?.manual
+                ? "Manual credit granted (non-EVM)" : "Payment verified. +1 credit" ); } } else { alert(r?.pending ?
+                `Pending (${r.confirmations || 0}/${r.need || 1})` : `Failed: ${r?.error || "unknown" }`); } } catch (e)
+                { alert(String(e)); } }}>{tr.verify}</button>
+          </div>
+        </div>
+
+        {/* Bind to photo */}
+        <div className="card" style={{ display: "flex" , gap: 10, alignItems: "center" }}>
+          <label><input type="checkbox" checked={bindPhoto} onChange={e=> setBindPhoto(e.target.checked)} />
+            {tr.bindPhoto}</label>
+          <button disabled={!bindPhoto} onClick={async ()=> { const r = await (window as any).gzqrExtra?.pickImage?.();
+            if (r?.ok) setPhotoPath(r.path); }}>{tr.choosePhoto}</button>
+          <div style={{ fontSize: 12, opacity: .85 }}>{tr.photoSelected} <code>{photoPath || "—"}</code></div>
+        </div>
+
+        {/* Encrypt */}
+        <section className="card" style={{ display: "grid" , gap: 12 }}>
+          <h3>{tr.enc} {plan === "pro" && <span style={{ opacity: .7, fontSize: 12 }}>(PDF)</span>}</h3>
+          <div>
+            <label>{tr.pass}</label>
+            <div style={{ position: "relative" }}>
+              <input type={showPass ? "text" : "password" } value={pass} onChange={e=> setPass(e.target.value)} style={{
+              width: "100%", marginTop: 6, paddingRight: 34, background: "#0f1117", color: "#eaeaf0", border: "1px solid
+              #2a2f3a", borderRadius: 8, padding: "8px" }} />
+              <button onClick={()=> setShowPass(v => !v)} style={{ position: "absolute", right: 6, top: 6, height: 28,
+                minWidth: 28 }}>{showPass ? "🙈" : "👁"}</button>
+            </div>
+            {!passOk && <div style={{ color: "#ff7b7b" , fontSize: 12, marginTop: 6 }}>{tr.must}</div>}
+          </div>
+          <div>
+            <label>{tr.outName}</label>
+            <input value={outName} onChange={e=> setOutName(e.target.value)} placeholder="backup" style={{ width:
+            "100%", marginTop: 6, background: "#0f1117", color: "#eaeaf0", border: "1px solid #2a2f3a", borderRadius: 8,
+            padding: "8px" }} />
+          </div>
+          <div style={{ display: "flex" , gap: 8, alignItems: "center" }}>
+            <button onClick={async ()=> { const r = await useIPC("file.pickPath")({ mode: "fileOrDir" }); if (r?.ok)
+              setEncIn(r.path); }}>{tr.pick}</button>
+            <div style={{ fontSize: 12, opacity: .85 }}>{tr.selected}: <code>{encIn || "—"}</code></div>
+          </div>
+          <div onDragOver={e=> e.preventDefault()} onDrop={e => { e.preventDefault(); const f = (e.dataTransfer!.files
+            || [])[0] as any; const p = (f?.path || ""); if (p) setEncIn(p); }}
+            style={{ border: "1px dashed #313244", borderRadius: 12, padding: 18, background: "#0c0f18", height: 86,
+            display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+            onClick={async () => { const r = await useIPC("file.pickPath")({ mode: "fileOrDir" }); if (r?.ok)
+            setEncIn(r.path); }}>{tr.dropFile}</div>
+          <div style={{ display: "flex" , gap: 8, alignItems: "center" }}>
+            <button style={{ flex: 1, opacity: (passOk && !!encIn && (plan !=="pro" || totalCredits> 0) && (!bindPhoto
+              || !!photoPath)) ? 1 : .5 }}
+              onClick={async () => {
+              setPEnc(0); setLogs(`> encoder.run ${encIn}`); const r = await (window as
+              any).electron?.ipc?.invoke?.("encoder.run", { input: encIn, pass, makePdf: plan === "pro", photo:
+              bindPhoto ? photoPath : undefined });
+              if (r?.ok) {
+              if (r.pngDir) setPngDir(r.pngDir); if (r.pdf) setPdf(r.pdf);
+              if (plan === "pro" && r.pdf) { const cc = await (window as any).gzqrExtra?.creditsConsume?.(1); if (cc) {
+              /* already consumed above */ } }
+              } else { setLogs(p => p + "\nERR: " + (r?.error || "encode failed")); }
+              }}>
+              {tr.runEncode}</button>
+            <button onClick={()=> { (window as any).gzqrExtra?.encCancel?.(); }}>{tr.cancel}</button>
+            {plan === "pro" ? (<><button disabled={!pdf} onClick={()=>
+                useIPC("file.openPath")(pdf)}>{tr.openPdf}</button>
+              <button disabled={!pdf} onClick={()=> useIPC("file.showInFolder")(pdf)}>{tr.showInFolder}</button>
+            </>)
+            : (<button disabled={!pngDir} onClick={()=>
+              useIPC("file.showInFolder")(pngDir)}>{tr.showInFolder}</button>)}
+          </div>
+          <Progress value={pEnc} />
+        </section>
+
+        {/* Decrypt */}
+        <section className="card" style={{ display: "grid" , gap: 12 }}>
+          <h3>{tr.dec}</h3>
+          <div>
+            <label>{tr.pass}</label>
+            <div style={{ position: "relative" }}>
+              <input type={showPass ? "text" : "password" } value={pass} onChange={e=> setPass(e.target.value)} style={{
+              width: "100%", marginTop: 6, paddingRight: 34, background: "#0f1117", color: "#eaeaf0", border: "1px solid
+              #2a2f3a", borderRadius: 8, padding: "8px" }} />
+              <button onClick={()=> setShowPass(v => !v)} style={{ position: "absolute", right: 6, top: 6, height: 28,
+                minWidth: 28 }}>{showPass ? "🙈" : "👁"}</button>
+            </div>
+            {!passOk && <div style={{ color: "#ff7b7b" , fontSize: 12, marginTop: 6 }}>{tr.must}</div>}
+          </div>
+
+          {plan === "oss" && <>
+            <div style={{ display: "flex" , gap: 8, alignItems: "center" }}>
+              <button onClick={async ()=> { const r = await useIPC("file.pickPath")({ mode: "dir" }); if (r?.ok) {
+                setPngDir(r.path); setPdf(""); } }}>{tr.pick}</button>
+              <div style={{ fontSize: 12, opacity: .85 }}><code>{pngDir || "—"}</code></div>
+            </div>
+            <div onDragOver={e=> e.preventDefault()} onDrop={e => { e.preventDefault(); const f = (e.dataTransfer!.files
+              || [])[0] as any; const p = (f?.path || ""); if (p) { setPngDir(p); setPdf(""); } }}
+              style={{ border: "1px dashed #313244", borderRadius: 12, padding: 18, background: "#0c0f18", height: 86,
+              display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>{tr.dropPng}</div>
+          </>}
+
+          {plan === "pro" && <>
+            <div style={{ display: "flex" , gap: 8, alignItems: "center" }}>
+              <button onClick={async ()=> { const r = await (window as any).gzqrExtra?.pickPDF?.(); if (r?.ok) { const x
+                = await ipcPdf({ pdf: r.path }); if (x?.dir) { setPngDir(x.dir); setPdf(r.path); } }
+                }}>{tr.browsePdf}</button>
+              <div style={{ fontSize: 12, opacity: .85 }}><code>{pdf || "—"}</code></div>
+            </div>
+            <div onDragOver={e=> e.preventDefault()} onDrop={async e => { e.preventDefault(); const f =
+              (e.dataTransfer!.files || [])[0] as any; if (!f?.path) return; const x = await ipcPdf({ pdf: f.path }); if
+              (x?.dir) { setPngDir(x.dir); setPdf(f.path); } }}
+              style={{ border: "1px dashed #313244", borderRadius: 12, padding: 18, background: "#0c0f18", height: 86,
+              display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>{tr.dropPdf}</div>
+          </>}
+
+          <div style={{ display: "flex" , gap: 8, alignItems: "center" }}>
+            <button style={{ flex: 1, opacity: (passOk && !!pngDir && (!bindPhoto || !!photoPath)) ? 1 : .5 }}
+              onClick={async ()=> {
+              setPDec(0); setLogs(p => p + "\n> decoder.run " + (pngDir || pdf));
+              const r = await (window as any).electron?.ipc?.invoke?.("decoder.run", { dir: pngDir, pass, photo:
+              bindPhoto ? photoPath : undefined });
+              if (!r?.ok) setLogs(p => p + "\nERR: " + (r?.error || "decode failed"));
+              }}>{tr.collect}</button>
+            <button onClick={()=> { (window as any).gzqrExtra?.decCancel?.(); }}>{tr.cancel}</button>
+          </div>
+          <Progress value={pDec} />
+        </section>
+
+        <section className="card" style={{ marginBottom: 20 }}>
+          <h3>{tr.logs}</h3>
+          <pre style={{ whiteSpace: "pre-wrap" , margin: 0 }}>{logs}</pre>
+        </section>
+      </div>;
+      }

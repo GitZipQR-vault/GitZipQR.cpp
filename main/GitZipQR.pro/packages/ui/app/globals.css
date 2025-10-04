@@ -1,0 +1,207 @@
+/* ====== GitZipQR — Neon Secure Purple Theme ====== */
+/* Цвета подобраны с упором на «безопасность»: высокая контрастность,
+   чёткие фокусы, мягкая неоновая индикация и «щит»-паттерн на фоне. */
+
+:root{
+  /* Базовая палитра */
+  --bg-0:#0b0a12;            /* фоновая ночь */
+  --bg-1:#0e0b19;            /* тёмный фиолетовый */
+  --bg-2:#131022;            /* приподнятые блоки */
+  --glass:#15132aee;         /* стекло/карты */
+  --border:#2e2a4a;          /* рамки */
+  --border-2:#4c4680;        /* hover/активные рамки */
+  --text:#f3f2fb;            /* основной текст */
+  --muted:#a9a5c7;           /* второй текст */
+
+  /* Акценты (фиолет/магент/розовый) */
+  --acc-1:#a56bff;           /* фиолетовый неон */
+  --acc-2:#ff4ecd;           /* марентово-розовый */
+  --acc-3:#6be3ff;           /* бирюзовый для баланса */
+  --ok:#2bd46f;
+  --bad:#ff6b8b;
+
+  /* Геометрия и тени */
+  --r:16px; --rs:12px;
+  --shadow: 0 18px 48px rgba(0,0,0,.55), 0 6px 16px rgba(0,0,0,.35);
+
+  /* Градиенты/свет */
+  --g-main: radial-gradient(1200px 500px at 10% -10%, rgba(165,107,255,.20), transparent 60%),
+            radial-gradient(1000px 400px at 110% -20%, rgba(255,78,205,.16), transparent 62%),
+            radial-gradient(900px 600px at 50% 120%, rgba(107,227,255,.12), transparent 68%);
+  --g-btn:  linear-gradient(135deg, var(--acc-1) 0%, var(--acc-2) 100%);
+  --g-prog: linear-gradient(90deg, #7c4dff, #b445ff, #ff4ecd, #6be3ff);
+
+  /* Шаг сетки-«щит» */
+  --shield-grid: repeating-linear-gradient( 90deg,
+      rgba(167,118,255,.065) 0px, rgba(167,118,255,.065) 1px, transparent 1px, transparent 22px),
+    repeating-linear-gradient( 0deg,
+      rgba(167,118,255,.055) 0px, rgba(167,118,255,.055) 1px, transparent 1px, transparent 22px);
+}
+
+/* ====== Базовая сцена ====== */
+*{box-sizing:border-box}
+html,body{
+  margin:0;
+  color:var(--text);
+  background:
+    var(--shield-grid),
+    radial-gradient(1200px 900px at 60% -10%, rgba(255,78,205,.10), transparent 60%),
+    radial-gradient(1200px 900px at -20% 80%, rgba(165,107,255,.08), transparent 60%),
+    linear-gradient(135deg, var(--bg-0), var(--bg-1) 45%, #090812 100%);
+}
+body{ accent-color: var(--acc-1); }
+
+/* Контейнер */
+.container{max-width:1140px;margin:0 auto;padding:24px 18px 96px}
+
+/* ====== Карточки/стекло ====== */
+.card{
+  position:relative;
+  border:1px solid var(--border);
+  border-radius:var(--r);
+  background: linear-gradient(180deg, rgba(21,19,42,.78), rgba(15,13,32,.78)), var(--g-main);
+  backdrop-filter: saturate(130%) blur(8px);
+  padding:16px; box-shadow:var(--shadow); overflow:hidden;
+}
+.card:before{
+  content:"";
+  position:absolute; inset:-2px;
+  background:
+    radial-gradient(500px 120px at -10% -10%, rgba(165,107,255,.18), transparent 60%),
+    radial-gradient(340px 140px at 110% -10%, rgba(255,78,205,.14), transparent 60%);
+  pointer-events:none; filter:blur(28px); opacity:.9;
+}
+
+/* ====== Тэги/чипсы ====== */
+.tag{
+  display:inline-flex; align-items:center; gap:8px;
+  padding:6px 10px; border-radius:12px;
+  background: linear-gradient(180deg, rgba(40,35,72,.8), rgba(28,25,52,.85));
+  border:1px solid rgba(132,126,176,.22);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.03);
+  transition: border-color .2s ease, box-shadow .2s ease, transform .08s ease;
+}
+.tag.active{
+  background: linear-gradient(135deg, rgba(165,107,255,.22), rgba(255,78,205,.22));
+  border-color: #9a6bff;
+  box-shadow: 0 0 0 2px rgba(165,107,255,.18) inset, 0 8px 22px rgba(165,107,255,.20);
+  transform: translateY(-1px);
+}
+
+/* ====== Кнопки ====== */
+button{
+  background: linear-gradient(135deg, #1b1740, #141033);
+  color:var(--text);
+  border:1px solid var(--border);
+  border-radius:var(--r);
+  padding:10px 14px;
+  cursor:pointer;
+  transition: transform .08s ease, box-shadow .2s ease, border-color .2s ease, background .2s ease;
+}
+button:hover{ transform:translateY(-1px); border-color:var(--border-2); box-shadow:0 12px 28px rgba(165,107,255,.20) }
+button:disabled{ opacity:.55; cursor:not-allowed; transform:none; box-shadow:none }
+
+.btn-primary{
+  background: var(--g-btn);
+  color:#290a2a;
+  border-color: rgba(255,78,205,.65);
+}
+.btn-primary:hover{
+  box-shadow: 0 14px 32px rgba(255,78,205,.35), 0 0 0 1px rgba(255,78,205,.35) inset;
+}
+
+/* ====== Поля ввода ====== */
+input,select{
+  background: linear-gradient(180deg, #151233, #120f2a);
+  color:#efeefe; border:1px solid #3a3266; border-radius:var(--rs);
+  padding:10px 10px; outline:none;
+  transition:border-color .2s ease, box-shadow .2s ease, background .2s ease;
+}
+input::placeholder{ color:#8b86a8 }
+input:focus, select:focus{
+  border-color:#9a6bff;
+  box-shadow: 0 0 0 3px rgba(154,107,255,.20);
+}
+
+/* ====== Дропзона ====== */
+.drop{
+  border:1px dashed #5c4fb8; border-radius:14px; padding:18px;
+  background: linear-gradient(180deg, rgba(27,23,58,.75), rgba(18,14,36,.85));
+  height:92px; display:flex; align-items:center; justify-content:center; cursor:pointer;
+  transition:border-color .2s ease, box-shadow .2s ease, transform .08s ease;
+}
+.drop:hover{ border-color:#a56bff; box-shadow: 0 10px 26px rgba(165,107,255,.18) }
+
+/* ====== Прогресс ====== */
+.progress{ position:relative; height:12px; background:#171432; border-radius:10px; overflow:hidden; border:1px solid #2e2752 }
+.progress>span{
+  position:absolute; inset:0 auto 0 0; width:0;
+  background: var(--g-prog);
+  filter: saturate(120%);
+  transition: width .25s;
+}
+
+/* ====== Логи ====== */
+.logs{
+  background: linear-gradient(180deg, #0c0a1a, #0a0916);
+  border:1px solid #242043; border-radius:12px; padding:12px;
+  max-height:280px; overflow:auto; white-space:pre-wrap;
+  box-shadow: inset 0 0 24px rgba(165,107,255,.06);
+}
+
+/* ====== Пилюля-ссылка ====== */
+.link-pill{
+  display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px;
+  background: linear-gradient(135deg, rgba(165,107,255,.16), rgba(255,78,205,.14));
+  border:1px solid rgba(165,107,255,.30);
+  box-shadow: 0 8px 24px rgba(165,107,255,.18);
+}
+.link-pill svg{opacity:.95}
+
+/* Бренд-градиент */
+.brand-grad{
+  background: linear-gradient(135deg, var(--acc-1), var(--acc-2));
+  -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+
+/* ====== iOS-свитчер (фиолетовый) ====== */
+.ios-switch{ display:inline-flex; align-items:center; gap:10px; user-select:none }
+.ios-switch input{
+  appearance:none; width:54px; height:30px; border-radius:999px; position:relative; outline:none;
+  border:1px solid #3b326a; background: #1a1735;
+  transition:background .2s ease, border-color .2s ease, box-shadow .2s ease;
+  display:inline-block; vertical-align:middle;
+}
+.ios-switch input::after{
+  content:""; position:absolute; top:3px; left:3px; width:24px; height:24px; border-radius:50%;
+  background:linear-gradient(180deg,#fff,#e9e8ff); transition:transform .2s ease;
+  box-shadow:0 2px 8px rgba(0,0,0,.35);
+}
+.ios-switch input:checked{
+  background: linear-gradient(135deg, #7c4dff, #ff4ecd);
+  border-color:#9a6bff; box-shadow:0 0 0 2px rgba(154,107,255,.16) inset;
+}
+.ios-switch input:checked::after{ transform:translateX(24px) }
+.ios-switch .label{ font-size:14px; opacity:.92 }
+
+/* ====== Тосты ====== */
+.toast{
+  position:fixed; right:18px; bottom:18px;
+  background:#191634; border:1px solid #4b3f8a; color:#eae8ff;
+  padding:10px 14px; border-radius:12px; box-shadow:0 14px 32px rgba(165,107,255,.28);
+  z-index:9999; opacity:.98;
+}
+.toast.err{ background:#2a0f1c; border-color:#a83a66; color:#ffddea }
+
+/* ====== Фокус и доступность ====== */
+:focus-visible{
+  outline:2px solid transparent;
+  box-shadow:0 0 0 3px rgba(154,107,255,.26), 0 0 0 6px rgba(255,78,205,.18);
+  border-radius:12px;
+}
+::selection{ background: rgba(165,107,255,.35); color:#fff }
+
+/* ====== Анимации без перегруза ====== */
+@media (prefers-reduced-motion: reduce){
+  *{ animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+}

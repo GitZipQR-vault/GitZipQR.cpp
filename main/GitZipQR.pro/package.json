@@ -1,0 +1,48 @@
+{
+  "name": "gitzipqr-pro-app",
+  "productName": "GitZipQR Pro",
+  "version": "0.0.1",
+  "main": "packages/desktop/src/main.js",
+  "files": [
+    "dist/**",
+    "!**/*.map"
+  ],
+  "build": {
+    "appId": "pro.gitzipqr",
+    "asar": true,
+    "directories": {
+      "buildResources": "build"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "GitZipQR-Pro-${version}-Setup.${ext}"
+    }
+  },
+  "scripts": {
+    "dev": "bunx concurrently -k -n UI,ELECTRON -c blue,magenta \"(cd packages/ui && bun run dev)\" \"bun run electron\"",
+    "electron": "bun run build:preload && cross-env UI_PORT=5123 electron --no-sandbox --disable-gpu-sandbox -r ts-node/register packages/app/mainproc/main.ts",
+    "build:preload": "esbuild packages/app/mainproc/preload.ts --bundle --platform=node --format=cjs --outfile=packages/app/dist/preload.cjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.0.0",
+    "electron": "^38.1.2",
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.25.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "pdfkit": "^0.17.2",
+    "sharp": "^0.34.4"
+  }
+}

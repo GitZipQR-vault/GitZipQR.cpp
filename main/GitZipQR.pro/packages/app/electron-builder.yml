@@ -1,0 +1,25 @@
+appId: com.restlessbyte.gitzipqrpro
+productName: GitZipQR Pro
+compression: maximum
+asar: true
+files:
+  - "dist/**"
+  - "../ui/.next/**"
+  - "scripts/**"
+  - "!**/*.map"
+directories:
+  output: "release"
+linux:
+  target:
+    - AppImage
+  category: Utility
+  artifactName: "GitZipQR-Pro-${version}-linux.${ext}"
+win:
+  target:
+    - nsis
+  artifactName: "GitZipQR-Pro-${version}-win.${ext}"
+nsis:
+  oneClick: true
+  perMachine: false
+  allowToChangeInstallationDirectory: false
+publish: null

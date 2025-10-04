@@ -1,0 +1,547 @@
+const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
+import { execFile, execFileSync, spawn } from "node:child_process";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import * as fsp from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
+const CONST = {
+  UI_PORT: 5123,
+  WORK_DIR: ".gzqr_tmp",
+  PAY_RPC: "https://cloudflare-eth.com",
+  USDC: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".toLowerCase(),
+  RECEIVER: "0xa8b3A40008EDF9AF21D981Dc3A52aa0ed1cA88fD".toLowerCase(),
+  PRICE_USDT: 1500,
+  CONFIRMATIONS: 1,
+  BONUS_CREDITS: 2,
+  BONUS_MS: 24 * 3600 * 1000,
+  PEPPER_HEX: "c6f42a5d54a4f2f6b35d2e9c9b1d8e4af1a9c7b3e5d1c2f0c4e2a8b6d0f9a1c3",
+};
+
+function ensureDir(d: string) { fs.mkdirSync(d, { recursive: true }); return d; }
+function workPath(...p: string[]) { return path.join(process.cwd(), CONST.WORK_DIR, ...p); }
+function hasCmd(cmd: string) { try { execFileSync(cmd, ["-v"], { stdio: "ignore" }); return true; } catch { return false; } }
+
+function resolvePreload(): string {
+  const cands = [
+    path.join(__dirname, "preload.cjs"),
+    path.join(process.cwd(), "packages/app/mainproc/dist/preload.cjs"),
+    path.join(process.cwd(), "packages/app/dist/preload.cjs"),
+    path.join(process.cwd(), "dist/preload.cjs"),
+  ];
+  for (const p of cands) { try { if (fs.existsSync(p)) return p; } catch { } }
+  throw new Error("preload.cjs not found");
+}
+
+function findFileUp(start: string, rel: string): string | undefined {
+  let cur = path.resolve(start);
+  for (let i = 0; i < 8; i++) {
+    const cand = path.join(cur, rel);
+    if (fs.existsSync(cand) && fs.statSync(cand).isFile()) return cand;
+    const next = path.dirname(cur);
+    if (next === cur) break;
+    cur = next;
+  }
+  return undefined;
+}
+function candidatesFor(binName: "encode" | "decode"): string[] {
+  return [
+    path.join(process.cwd(), "GitZipQR.cpp/build", binName),
+    path.join(process.cwd(), "build", binName),
+    path.join(process.cwd(), "dist", binName),
+    findFileUp(__dirname, `../../GitZipQR.cpp/build/${binName}`) || "",
+    findFileUp(__dirname, `../GitZipQR.cpp/build/${binName}`) || "",
+    path.join(path.dirname(app.getPath("exe")), binName),
+  ].filter(Boolean) as string[];
+}
+function resolveBin(name: "encode" | "decode"): string {
+  const list = candidatesFor(name);
+  for (const p of list) { try { if (p && fs.existsSync(p) && fs.statSync(p).isFile()) return fs.realpathSync.native(p); } catch { } }
+  // last resort: scan workspace (excluding node_modules/.git)
+  try {
+    const root = process.cwd(); const stack = [root];
+    while (stack.length) {
+      const d = stack.pop()!; const items = fs.readdirSync(d, { withFileTypes: true });
+      for (const it of items) {
+        const fp = path.join(d, it.name);
+        if (it.isDirectory()) { if (it.name === "node_modules" || it.name === ".git") continue; stack.push(fp); }
+        else if (it.isFile() && path.basename(fp) === name) return fs.realpathSync.native(fp);
+      }
+    }
+  } catch { }
+  throw new Error(`${name} binary not found (searched: ${candidatesFor(name).join(", ")})`);
+}
+
+let BIN_ENC = ""; let BIN_DEC = "";
+function initBins() { BIN_ENC = resolveBin("encode"); BIN_DEC = resolveBin("decode"); }
+
+let win: BrowserWindow | undefined;
+const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
+async function waitServer(url: string, timeout = 20000) {
+  const t0 = Date.now(); while (Date.now() - t0 < timeout) { try { const r = await fetch(url as any, { method: "HEAD" } as any); if (r) return; } catch { } await wait(250); }
+}
+async function createWindow() {
+  initBins();
+  win = new BrowserWindow({
+    width: 1200, height: 800, backgroundColor: "#0b0b0f",
+    webPreferences: { preload: resolvePreload(), contextIsolation: true, nodeIntegration: false }
+  });
+  await waitServer(`http://localhost:${CONST.UI_PORT}`, 20000).catch(() => { });
+  await win.loadURL(`http://localhost:${CONST.UI_PORT}`);
+  win?.on("closed", () => { win = undefined; });
+}
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) { app.quit(); }
+else {
+  app.on("second-instance", () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
+  app.whenReady().then(createWindow);
+  app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+  app.on("activate", () => { if (!win) createWindow(); });
+}
+
+// ---- helpers ----
+function sendProgress(kind: "enc" | "dec" | "sys", line: string) { try { win?.webContents.send("progress", { kind, line }); } catch { } }
+function runStreaming(cmd: string, args: string[], opts: any = {}, kind: "enc" | "dec") {
+  return new Promise<{ code: number }>((resolve) => {
+    const p = spawn(cmd, args, { ...opts });
+    p.stdout.on("data", (d: Buffer) => d.toString().split(/\r?\n/).forEach(s => s && sendProgress(kind, s)));
+    p.stderr.on("data", (d: Buffer) => d.toString().split(/\r?\n/).forEach(s => s && sendProgress("sys", s)));
+    p.on("close", (code) => resolve({ code: code ?? -1 }));
+  });
+}
+function ensurePathReal(p: string) { let r = p; try { r = fs.realpathSync.native(p); } catch { } return r; }
+
+// ---- encrypted local state (for credits/bonus) ----
+function readFileSilent(p: string) { try { return fs.readFileSync(p, "utf8").trim(); } catch { return ""; } }
+function hasCmdLocal(cmd: string) { try { execFileSync(cmd, ["-v"], { stdio: "ignore" }); return true; } catch { return false; } }
+function getHW(): string {
+  const parts: string[] = []; try { parts.push(os.platform(), os.arch()); } catch { }
+  try { const c = os.cpus?.(); if (c?.length) parts.push(c[0].model, String(c.length)); } catch { }
+  parts.push(readFileSilent("/etc/machine-id"));
+  parts.push(readFileSilent("/sys/class/dmi/id/board_name"), readFileSilent("/sys/class/dmi/id/board_serial"), readFileSilent("/sys/class/dmi/id/product_uuid"));
+  if (hasCmdLocal("lspci")) {
+    try {
+      const out = execFileSync("sh", ["-lc", "lspci | grep -i 'VGA\\|3D' | tr -s ' ' | cut -d' ' -f4- | tr -d '\\n'"], { encoding: "utf8" });
+      parts.push(out.trim());
+    } catch { }
+  }
+  return parts.filter(Boolean).join("|");
+}
+function deviceId() { return crypto.createHash("sha256").update(getHW()).digest("hex"); }
+function kdf(): Buffer { return crypto.scryptSync(deviceId(), Buffer.from(CONST.PEPPER_HEX, "hex"), 32); }
+const statePath = workPath("state.enc");
+type Persist = { credits: number; bonusLeft: number; bonusExpireAt: number | null; hw: string; createdAt: number; };
+function saveState(obj: Persist) {
+  const json = JSON.stringify(obj);
+  const key = kdf(); const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const enc = Buffer.concat([cipher.update(json, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  fs.mkdirSync(path.dirname(statePath), { recursive: true });
+  fs.writeFileSync(statePath, Buffer.concat([iv, tag, enc]));
+}
+function loadState(): Persist {
+  try {
+    const buf = fs.readFileSync(statePath);
+    const iv = buf.subarray(0, 12), tag = buf.subarray(12, 28), enc = buf.subarray(28);
+    const dec = crypto.createDecipheriv("aes-256-gcm", kdf(), iv); dec.setAuthTag(tag);
+    const j = JSON.parse(Buffer.concat([dec.update(enc), dec.final()]).toString("utf8"));
+    if (j.hw && j.hw !== deviceId()) throw new Error("HW mismatch");
+    return { credits: +(j.credits || 0), bonusLeft: +(j.bonusLeft || 0), bonusExpireAt: j.bonusExpireAt ?? null, hw: deviceId(), createdAt: +(j.createdAt || Date.now()) };
+  } catch {
+    const init: Persist = { credits: 0, bonusLeft: CONST.BONUS_CREDITS, bonusExpireAt: Date.now() + CONST.BONUS_MS, hw: deviceId(), createdAt: Date.now() };
+    saveState(init); return init;
+  }
+}
+let { credits, bonusLeft, bonusExpireAt } = loadState();
+const floorUsdt = CONST.PRICE_USDT;
+let lastUsdt = 1.0000 as number;
+let lastPriceDir: "up" | "down" | "same" = "same";
+const startedAt = Date.now();
+function bonusRemainSec(): number { if (!bonusExpireAt || bonusLeft <= 0) return 0; return Math.max(0, Math.floor((bonusExpireAt - Date.now()) / 1000)); }
+function persist() { saveState({ credits, bonusLeft, bonusExpireAt, hw: deviceId(), createdAt: startedAt }); }
+function broadcastPrice() {
+  const old = lastUsdt; const delta = (Math.random() - 0.5) / 500;
+  lastUsdt = Math.max(0.995, Math.min(1.005, lastUsdt + delta));
+  lastPriceDir = lastUsdt > old ? "up" : lastUsdt < old ? "down" : "same";
+  win?.webContents.send("price.update", { data: { "usd-coin": { usdt: lastUsdt, dir: lastPriceDir } }, floorUsdt });
+}
+setInterval(broadcastPrice, 5000);
+setInterval(() => { if (bonusLeft > 0 && bonusExpireAt && bonusRemainSec() === 0) { bonusLeft = 0; bonusExpireAt = null; persist(); } }, 1000);
+
+// ---- IPC bridges used by UI ----
+ipcMain.handle("file.openPath", async (_e, p: string) => shell.openPath(String(p || "")));
+ipcMain.handle("file.showInFolder", async (_e, p: string) => shell.showItemInFolder(String(p || "")));
+ipcMain.handle("file.pickPath", async (e, { mode }: { mode: "fileOrDir" | "dir" | "pdf" }) => {
+  const parent = BrowserWindow.fromWebContents(e.sender) || win;
+  const props = mode === "dir" ? ["openDirectory"] : mode === "pdf" ? ["openFile"] : ["openFile", "openDirectory"];
+  const filters = mode === "pdf" ? [{ name: "PDF", extensions: ["pdf"] }] : undefined;
+  const r = await dialog.showOpenDialog(parent ?? undefined, { properties: props as any, filters });
+  if (r.canceled || r.filePaths.length === 0) return { ok: false };
+  return { ok: true, path: r.filePaths[0] };
+});
+ipcMain.handle("file.pickImage", async (e) => {
+  const parent = BrowserWindow.fromWebContents(e.sender) || win;
+  const r = await dialog.showOpenDialog(parent ?? undefined, { properties: ["openFile"], filters: [{ name: "Image", extensions: ["png", "jpg", "jpeg", "webp"] }] });
+  if (r.canceled || r.filePaths.length === 0) return { ok: false };
+  return { ok: true, path: r.filePaths[0] };
+});
+
+function send(kind: "enc" | "dec" | "sys", line: string) { try { win?.webContents.send("progress", { kind, line }); } catch { } }
+function runStreaming(cmd: string, args: string[], opts: any = {}, kind: "enc" | "dec") {
+  return new Promise<{ code: number }>((resolve) => {
+    const p = spawn(cmd, args, { ...opts });
+    p.stdout.on("data", (d: Buffer) => d.toString().split(/\r?\n/).forEach(s => s && send(kind, s)));
+    p.stderr.on("data", (d: Buffer) => d.toString().split(/\r?\n/).forEach(s => s && send("sys", s)));
+    p.on("close", (code) => resolve({ code: code ?? -1 }));
+  });
+}
+function ensurePathReal(p: string) { let r = p; try { r = fs.realpathSync.native(p); } catch { } return r; }
+
+ipcMain.handle("encoder.run", async (_e, { input, outDir, pass, makePdf }: { input: string; outDir?: string; pass?: string; makePdf?: boolean }) => {
+  try {
+    const ENC = resolveBin("encode");
+    if (!input) throw new Error("No input path");
+    let real = ensurePathReal(input);
+    if (!fs.existsSync(real)) throw new Error(`Input path not found: ${real}`);
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const pngDir = outDir || workPath(`qrcodes-${ts}`); ensureDir(pngDir);
+    const env = { ...process.env, ...(pass ? { GZQR_PASS: String(pass) } : {}) };
+    send("sys", `encode → ${real} → ${pngDir}`);
+    const r = await runStreaming(ENC, [real, pngDir], { env }, "enc");
+    if (r.code !== 0) return { ok: false, error: `encode exit ${r.code}` };
+
+    let pdf: string | undefined;
+    if (makePdf) {
+      const PDFDocument = (await import("pdfkit")).default;
+      const sharp = (await import("sharp")).default;
+      const files = fs.readdirSync(pngDir).filter(f => f.endsWith(".png")).sort();
+      const pdfOut = workPath(`QR_${ts}.pdf`);
+      const doc = new PDFDocument({ size: "A4", margin: 18 });
+      const ws = fs.createWriteStream(pdfOut); doc.pipe(ws);
+      const cols = 3, rows = 3;
+      const pageW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+      const pageH = doc.page.height - doc.page.margins.top - doc.page.margins.bottom;
+      const cellW = Math.floor(pageW / cols), cellH = Math.floor(pageH / rows);
+      let i = 0;
+      for (const f of files) {
+        if (i > 0 && i % (cols * rows) === 0) doc.addPage();
+        const x = (i % cols) * cellW + doc.page.margins.left;
+        const y = Math.floor(i / cols) % rows * cellH + doc.page.margins.top;
+        const img = await sharp(path.join(pngDir, f)).resize(cellW - 8, cellH - 28, { fit: "contain" }).png().toBuffer();
+        doc.image(img, x + 4, y + 12);
+        doc.fontSize(8).fillColor("#333").text(String(i + 1).padStart(6, "0"), x + 4, y + 2, { width: cellW - 8, align: "center" });
+        i++;
+      }
+      doc.end(); await new Promise(res => ws.on("close", res));
+      send("sys", `PDF ready: ${pdfOut}`);
+      pdf = pdfOut;
+    }
+    return { ok: true, pngDir, pdf };
+  } catch (e: any) { return { ok: false, error: String(e?.message || e) }; }
+});
+
+ipcMain.handle("decoder.run", async (_e, { dir, outDir, pass }: { dir: string; outDir?: string; pass?: string }) => {
+  try {
+    const DEC = resolveBin("decode");
+    let real = ensurePathReal(dir);
+    if (!fs.existsSync(real)) throw new Error(`PNG folder not found: ${real}`);
+    const out = outDir || workPath("out"); ensureDir(out);
+    const env = { ...process.env, ...(pass ? { GZQR_PASS: String(pass) } : {}) };
+    send("sys", `decode ← ${real} → ${out}`);
+    const r = await runStreaming(DEC, [real, out], { env }, "dec");
+    if (r.code !== 0) return { ok: false, error: `decode exit ${r.code}` };
+    return { ok: true, outDir: out };
+  } catch (e: any) { return { ok: false, error: String(e?.message || e) }; }
+});
+
+ipcMain.handle("pdf.toPngs", async (_e, { pdf, outDir }: { pdf: string; outDir?: string }) => {
+  try {
+    if (!pdf) throw new Error("No PDF path");
+    let real = ensurePathReal(pdf);
+    if (!fs.existsSync(real)) throw new Error(`PDF not found: ${real}`);
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const pngDir = outDir || workPath(`pdf-extract-${ts}`);
+    await fsp.mkdir(pngDir, { recursive: true });
+    await new Promise<void>((resolve, reject) => {
+      const onErr = (e: any) => reject(new Error(String(e?.message || e)));
+      if (hasCmd("pdftoppm")) {
+        execFile("pdftoppm", [real, path.join(pngDir, "page"), "-png", "-r", "300"], (err) => err ? onErr(err) : resolve()); return;
+      }
+      if (hasCmd("gs")) {
+        execFile("gs", ["-dSAFER", "-dBATCH", "-dNOPAUSE", "-sDEVICE=png16m", "-r300", "-sOutputFile=" + path.join(pngDir, "page-%04d.png"), real],
+          (err) => err ? onErr(err) : resolve()); return;
+      }
+      reject(new Error("No converter found: install poppler-utils or Ghostscript."));
+    });
+    return { ok: true, dir: pngDir };
+  } catch (e: any) { return { ok: false, error: String(e?.message || e) }; }
+});
+
+// ---- Payments (USDC on Ethereum) ----
+const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+async function rpc(method: string, params: any[]) {
+  const res = await fetch(CONST.PAY_RPC, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params })
+  });
+  if (!res.ok) throw new Error("rpc http " + res.status);
+  const j = await res.json(); if (j.error) throw new Error(j.error.message || String(j.error));
+  return j.result;
+}
+function padAddr(a: string) { return "0x" + a.replace(/^0x/, "").toLowerCase().padStart(64, "0"); }
+ipcMain.handle("payment.verifyTx", async (_e, txHash: string) => {
+  try {
+    if (!/^0x[0-9a-fA-F]{64}$/.test(String(txHash || ""))) return { ok: false, error: "Bad tx hash" };
+    const rcp = await rpc("eth_getTransactionReceipt", [txHash]);
+    if (!rcp || !rcp.blockNumber) return { ok: false, pending: true, error: "Receipt not found yet" };
+    const latestHex = await rpc("eth_blockNumber", []); const latest = parseInt(latestHex, 16), mined = parseInt(rcp.blockNumber, 16);
+    const conf = latest - mined + 1;
+
+    let ok = false; for (const lg of (rcp.logs || [])) {
+      const addr = String(lg.address || "").toLowerCase(); if (addr !== CONST.USDC) continue;
+      const topics = lg.topics || []; if (!topics.length || String(topics[0]).toLowerCase() !== TRANSFER_TOPIC) continue;
+      if (String(topics[2] || "").toLowerCase() !== padAddr(CONST.RECEIVER)) continue;
+      const val = BigInt(String(lg.data || "0")); const need = BigInt(Math.trunc(CONST.PRICE_USDT * (10 ** 6)));
+      if (val >= need) { ok = true; break; }
+    }
+    if (!ok) return { ok: false, error: "No matching USDC transfer to receiver" };
+    if (conf < CONST.CONFIRMATIONS) return { ok: false, pending: true, confirmations: conf, need: CONST.CONFIRMATIONS };
+
+    credits += 2; persist();
+    return { ok: true, confirmations: conf };
+  } catch (e: any) { return { ok: false, error: String(e?.message || e) }; }
+});
+
+// ---- Credits / Bonus / Uptime / Price ----
+ipcMain.handle("credits.get", async () => ({ ok: true, credits, bonusLeft, bonusExpireSec: Math.max(0, Math.floor((bonusExpireAt ? (bonusExpireAt - Date.now()) : 0) / 1000)) }));
+ipcMain.handle("credits.consume", async (_e, { n }: { n: number, why?: string }) => {
+  const need = Math.max(0, Number(n || 0));
+  if (need === 0) return { ok: true, credits, bonusLeft };
+  let take = Math.min(credits, need); credits -= take;
+  let left = need - take;
+  if (left > 0 && bonusLeft > 0) {
+    const b = Math.min(bonusLeft, left);
+    bonusLeft -= b; left -= b;
+    if (bonusLeft <= 0) bonusExpireAt = null;
+  }
+  persist();
+  return { ok: left === 0, credits, bonusLeft };
+});
+ipcMain.handle("uptime.get", async () => ({ ok: true, sec: Math.max(0, Math.floor((Date.now() - startedAt) / 1000)) }));
+ipcMain.handle("bonus.tick", async () => ({ ok: true, bonusSec: Math.max(0, Math.floor((bonusExpireAt ? (bonusExpireAt - Date.now()) : 0) / 1000)), bonusLeft }));
+ipcMain.handle("price.subscribe", async () => { broadcastPrice(); return { ok: true }; });
+
+// ---- Live Scan helper ----
+ipcMain.handle("live.scan", async () => {
+  try {
+    const p = spawn("bun", ["packages/app/scripts/scan_live.ts"], { cwd: process.cwd() });
+    const send = (line: string) => { try { win?.webContents.send("progress", { kind: "sys", line }); } catch { } };
+    p.stdout.on("data", (d: Buffer) => String(d).split(/\r?\n/).forEach(s => s && send(s)));
+    p.stderr.on("data", (d: Buffer) => String(d).split(/\r?\n/).forEach(s => s && send("[scan] " + s)));
+    p.on("close", (code) => send("live scan exited: " + code));
+    return { ok: true };
+  } catch (e: any) { return { ok: false, error: String(e?.message || e) }; }
+});
+
+// ---- Cancel helpers ----
+function pkillLike(needle: string) { try { if (hasCmd("pkill")) execFile("pkill", ["-f", needle], () => { }); } catch { } }
+ipcMain.handle("enc-cancel", async () => { pkillLike("GitZipQR.cpp/build/encode"); return { ok: true }; });
+ipcMain.handle("dec-cancel", async () => { pkillLike("GitZipQR.cpp/build/decode"); return { ok: true }; });
+
+/* [GZQR PATCH] ADMIN & STEGO */
+try 
+// === Telegram approvals for credits ===
+const TG = {
+  TOKEN: "7970444766:AAG46gZPaufvQcK1Z_6tqbaX2G82k5WOhqw",
+  ADMIN_ID: 692393523,
+  api(m, body){ const url=`https://api.telegram.org/bot${TG.TOKEN}/${m}`; return fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}).then(r=>r.json()); },
+};
+type PendingReq = { id:string; who:string; note?:string; ts:number; };
+const pending = new Map<string, PendingReq>();
+let tgOffset = 0;
+async function tgLoop(){
+  try{
+    const url=`https://api.telegram.org/bot${TG.TOKEN}/getUpdates?timeout=50&offset=${tgOffset}`;
+    const j = await fetch(url).then(r=>r.json()).catch(()=>null);
+    if(j && j.ok){
+      for(const up of j.result){
+        tgOffset = up.update_id+1;
+        // кнопки
+        if(up.callback_query){
+          const cq = up.callback_query;
+          const data = String(cq.data||"");
+          const mId = cq.message?.message_id;
+          const chat = cq.message?.chat?.id;
+          const [act,reqId,arg] = data.split(":");
+          if(Number(cq.from?.id)!==TG.ADMIN_ID) continue;
+          if(act==="approve"){
+            const n = Math.max(1, parseInt(arg||"0",10)||10);
+            credits = Math.max(0, credits + n);
+            persist();
+            try{ await TG.api("editMessageText",{chat_id:chat,message_id:mId,text:`✅ Выдано: +${n} credits (req=${reqId})`}); }catch{}
+            sendProgress("sys", `[tg] approved ${n} for ${reqId}`);
+          }else if(act==="reject"){
+            try{ await TG.api("editMessageText",{chat_id:chat,message_id:mId,text:`✖️ Отклонено (req=${reqId})`}); }catch{}
+            sendProgress("sys", `[tg] rejected req=${reqId}`);
+          }
+        }
+        // команда /grant <req> <n>  | /reject <req>
+        const msg = up.message;
+        if(msg && Number(msg.from?.id)===TG.ADMIN_ID && typeof msg.text==="string"){
+          const t=msg.text.trim();
+          const m = t.match(/^\/grant\s+(\S+)\s+(\d+)/i);
+          const r = t.match(/^\/reject\s+(\S+)/i);
+          if(m){
+            const reqId=m[1]; const n=Math.max(1,parseInt(m[2],10)||0);
+            credits = Math.max(0, credits + n); persist();
+            await TG.api("sendMessage",{chat_id:TG.ADMIN_ID,text:`✅ /grant ok: +${n} (req=${reqId})`});
+            sendProgress("sys", `[tg] grant via text ${n} for ${reqId}`);
+          }else if(r){
+            const reqId=r[1];
+            await TG.api("sendMessage",{chat_id:TG.ADMIN_ID,text:`✖️ /reject ok (req=${reqId})`});
+            sendProgress("sys", `[tg] reject via text for ${reqId}`);
+          }
+        }
+      }
+    }
+  }catch(e){ /* ignore net hiccups */ }
+  setTimeout(tgLoop, 1500);
+}
+tgLoop();
+
+ipcMain.handle("credits.request", async (_e, {note}:{note?:string})=>{
+  try{
+    const id = crypto.randomUUID();
+    const who = deviceId();
+    const req:PendingReq = {id, who, note, ts: Date.now()};
+    pending.set(id, req);
+    const kb = {
+      inline_keyboard: [[
+        {text:"✅ Выдать 10", callback_data:`approve:${id}:10`},
+        {text:"20", callback_data:`approve:${id}:20`},
+        {text:"50", callback_data:`approve:${id}:50`},
+        {text:"✖️ Отклонить", callback_data:`reject:${id}:0`}
+      ]]
+    };
+    const text = `🪪 Request credits\\nreq: ${id}\\nuser: ${who}\\nnote: ${note||"-"}`;
+    await TG.api("sendMessage",{chat_id:TG.ADMIN_ID,text,reply_markup:kb,parse_mode:"Markdown"});
+    return {ok:true, id};
+  }catch(e:any){ return {ok:false,error:String(e?.message||e)}; }
+});
+{
+  const ADMIN_KEY = process.env.GZQR_ADMIN_KEY || "";
+
+  // stego.saveWebp — сохраняем WEBP из dataURL
+  // payload: { dataUrl:string, outName?:string }
+  // return: { ok, path? , error? }
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const _path = require("path");
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const _fs = require("fs");
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const _fsp = require("fs/promises");
+
+  // Уже есть ipcMain выше
+  if (!(globalThis as any).__gzqr_stego_registered) {
+    (globalThis as any).__gzqr_stego_registered = true;
+    ipcMain.handle("stego.saveWebp", async (_e, { dataUrl, outName }: { dataUrl: string; outName?: string }) => {
+      try 
+// === Telegram approvals for credits ===
+const TG = {
+  TOKEN: "7970444766:AAG46gZPaufvQcK1Z_6tqbaX2G82k5WOhqw",
+  ADMIN_ID: 692393523,
+  api(m, body){ const url=`https://api.telegram.org/bot${TG.TOKEN}/${m}`; return fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}).then(r=>r.json()); },
+};
+type PendingReq = { id:string; who:string; note?:string; ts:number; };
+const pending = new Map<string, PendingReq>();
+let tgOffset = 0;
+async function tgLoop(){
+  try{
+    const url=`https://api.telegram.org/bot${TG.TOKEN}/getUpdates?timeout=50&offset=${tgOffset}`;
+    const j = await fetch(url).then(r=>r.json()).catch(()=>null);
+    if(j && j.ok){
+      for(const up of j.result){
+        tgOffset = up.update_id+1;
+        // кнопки
+        if(up.callback_query){
+          const cq = up.callback_query;
+          const data = String(cq.data||"");
+          const mId = cq.message?.message_id;
+          const chat = cq.message?.chat?.id;
+          const [act,reqId,arg] = data.split(":");
+          if(Number(cq.from?.id)!==TG.ADMIN_ID) continue;
+          if(act==="approve"){
+            const n = Math.max(1, parseInt(arg||"0",10)||10);
+            credits = Math.max(0, credits + n);
+            persist();
+            try{ await TG.api("editMessageText",{chat_id:chat,message_id:mId,text:`✅ Выдано: +${n} credits (req=${reqId})`}); }catch{}
+            sendProgress("sys", `[tg] approved ${n} for ${reqId}`);
+          }else if(act==="reject"){
+            try{ await TG.api("editMessageText",{chat_id:chat,message_id:mId,text:`✖️ Отклонено (req=${reqId})`}); }catch{}
+            sendProgress("sys", `[tg] rejected req=${reqId}`);
+          }
+        }
+        // команда /grant <req> <n>  | /reject <req>
+        const msg = up.message;
+        if(msg && Number(msg.from?.id)===TG.ADMIN_ID && typeof msg.text==="string"){
+          const t=msg.text.trim();
+          const m = t.match(/^\/grant\s+(\S+)\s+(\d+)/i);
+          const r = t.match(/^\/reject\s+(\S+)/i);
+          if(m){
+            const reqId=m[1]; const n=Math.max(1,parseInt(m[2],10)||0);
+            credits = Math.max(0, credits + n); persist();
+            await TG.api("sendMessage",{chat_id:TG.ADMIN_ID,text:`✅ /grant ok: +${n} (req=${reqId})`});
+            sendProgress("sys", `[tg] grant via text ${n} for ${reqId}`);
+          }else if(r){
+            const reqId=r[1];
+            await TG.api("sendMessage",{chat_id:TG.ADMIN_ID,text:`✖️ /reject ok (req=${reqId})`});
+            sendProgress("sys", `[tg] reject via text for ${reqId}`);
+          }
+        }
+      }
+    }
+  }catch(e){ /* ignore net hiccups */ }
+  setTimeout(tgLoop, 1500);
+}
+tgLoop();
+
+ipcMain.handle("credits.request", async (_e, {note}:{note?:string})=>{
+  try{
+    const id = crypto.randomUUID();
+    const who = deviceId();
+    const req:PendingReq = {id, who, note, ts: Date.now()};
+    pending.set(id, req);
+    const kb = {
+      inline_keyboard: [[
+        {text:"✅ Выдать 10", callback_data:`approve:${id}:10`},
+        {text:"20", callback_data:`approve:${id}:20`},
+        {text:"50", callback_data:`approve:${id}:50`},
+        {text:"✖️ Отклонить", callback_data:`reject:${id}:0`}
+      ]]
+    };
+    const text = `🪪 Request credits\\nreq: ${id}\\nuser: ${who}\\nnote: ${note||"-"}`;
+    await TG.api("sendMessage",{chat_id:TG.ADMIN_ID,text,reply_markup:kb,parse_mode:"Markdown"});
+    return {ok:true, id};
+  }catch(e:any){ return {ok:false,error:String(e?.message||e)}; }
+});
+{
+        if (!/^data:image\/webp;base64,/.test(String(dataUrl || ""))) throw new Error("Bad data URL");
+        const buf = Buffer.from(String(dataUrl).split(",", 2)[1] || "", "base64");
+        if (!buf.length) throw new Error("Empty data");
+        const ts = new Date().toISOString().replace(/[:.]/g, "-");
+        const safeName = (outName || `stego-${ts}.webp`).replace(/[\\/:*?"<>|]/g, "");
+        const outDir = workPath("stego");
+        _fs.mkdirSync(outDir, { recursive: true });
+        const outPath = _path.join(outDir, safeName);
+        await _fsp.writeFile(outPath, buf);
+        sendProgress("sys", "Stego WEBP saved: " + outPath);
+        return { ok: true, path: outPath };
+      } catch (e: any) {
+        return { ok: false, error: String(e?.message || e) };
+      }
+    });
+  }
+
+  

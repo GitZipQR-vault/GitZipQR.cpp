@@ -1,0 +1,12 @@
+{
+  "name": "@gitzipqr/app",
+  "private": true,
+  "scripts": {
+    "build": "concurrently -k -n MAIN,PRELOAD -c auto \"bun build mainproc/main.ts --outfile dist/main.cjs --target node --format cjs --minify\" \"bun build mainproc/preload.ts --outfile dist/preload.cjs --target node --format cjs --minify\"",
+    "build:watch": "concurrently -k -n MAIN,PRELOAD -c auto \"bun build mainproc/main.ts --outfile dist/main.cjs --target node --format cjs --watch --minify --target node --format cjs\" \"bun build mainproc/preload.ts --outfile dist/preload.cjs --target node --format cjs --watch --minify\""
+  },
+  "dependencies": {
+    "pdfkit": "^0.17.2",
+    "sharp": "^0.34.4"
+  }
+}
