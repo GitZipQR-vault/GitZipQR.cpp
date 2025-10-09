@@ -1,0 +1,3 @@
+src/config.hpp
+data
+*/*.{png,jpg,tar,zip,webp}
