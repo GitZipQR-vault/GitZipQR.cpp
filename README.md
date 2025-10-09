@@ -70,7 +70,7 @@ pacman -S --noconfirm git make
 ### 2) Build the project
 
 ```bash
-git clone https://github.com/RestlessByte/GitZipQR.cpp.git
+git clone https://github.com/GitZipQR-vault/GitZipQR.cpp.git
 cd GitZipQR.cpp
 cp src/config.example.hpp src/config.hpp
 make -j$(nproc)
